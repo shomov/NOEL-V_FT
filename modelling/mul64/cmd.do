@@ -388,7 +388,6 @@ vsim tb_mul
 
 ## part 4: add signals
 
-## add wave                    -label "clk"         /tb_wb_transmitter/transmitter/clk_sys
 add wave -position insertpoint  \
 sim:/tb_mul/clk \
 sim:/tb_mul/rstn \

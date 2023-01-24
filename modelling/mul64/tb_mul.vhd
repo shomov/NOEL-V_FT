@@ -57,58 +57,9 @@ begin
                 control := control + 1;
         end if;
         ctrl <= conv_std_logic_vector(control, ctrl'length);
-        op1 <= conv_std_logic_vector(16#4#, 32);
+        op1 <= conv_std_logic_vector(16#65985#, 32);
         op2 <= conv_std_logic_vector(16#2#, 32);
-        wait for 160ns;
-        holdn <= '0';
-        if (control = 7) then
-            control := 0;
-            else
-                control := control + 1;
-        end if;
-        ctrl <= conv_std_logic_vector(control, ctrl'length);
-        op1 <= conv_std_logic_vector(0, 32);
-        op2 <= conv_std_logic_vector(0, 32);
-        wait for 160ns;
-        holdn <= '1';
-        if (control = 7) then
-            control := 0;
-            else
-                control := control + 1;
-        end if;
-        ctrl <= conv_std_logic_vector(control, ctrl'length);
-        op1 <= conv_std_logic_vector(45, 32);
-        op2 <= conv_std_logic_vector(2, 32);
-        wait for 160ns;
-        holdn <= '0';
-        if (control = 7) then
-            control := 0;
-            else
-                control := control + 1;
-        end if;
-        ctrl <= conv_std_logic_vector(control, ctrl'length);
-        op1 <= conv_std_logic_vector(0, 32);
-        op2 <= conv_std_logic_vector(0, 32);
-        wait for 160ns;
-        holdn <= '1';
-        if (control = 7) then
-            control := 0;
-            else
-                control := control + 1;
-        end if;
-        ctrl <= conv_std_logic_vector(control, ctrl'length);
-        op1 <= conv_std_logic_vector(65536, 32);
-        op2 <= conv_std_logic_vector(2, 32);
-        wait for 160ns;
-        holdn <= '0';
-        if (control = 7) then
-            control := 0;
-            else
-                control := control + 1;
-        end if;
-        ctrl <= conv_std_logic_vector(control, ctrl'length);
-        op1 <= conv_std_logic_vector(0, 32);
-        op2 <= conv_std_logic_vector(0, 32);
+       
         wait for 20 ns;
     end process mul_signals;
 
