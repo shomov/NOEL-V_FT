@@ -1,0 +1,34 @@
+
+Number of processors
+CONFIG_PROC_NUM
+  The number of processor cores.
+
+Select standard configuration
+CONFIG_NOELV_HP
+  HP: RV64/32GCH (target for ASIC)
+  GP: RV64/32GCH (signle or dual issue)
+  MC: RV64/32imac(fd) (signle issue)
+
+Select Full/Lite configuration
+CONFIG_NOELV_FULL
+  Full: Standard version
+  Lite: Limited (scaled-down) version
+
+Select Single-/Dual-issue configuration
+CONFIG_NOELV_SISSU
+  Single-issue: Pipeline is single-issue
+  Dual-issue: Pipeline is Dual-issue
+
+Select FPU configuration
+CONFIG_NOELV_FPU
+  FPU-enable: Enable FPU
+  FPU-disable: Disable FPU
+
+IU assembly printing
+CONFIG_IU_DISAS
+  Enable printing of executed instructions to the console.
+
+NOEL-V subsystem GPL settings
+CONFIG_PROC_NODBUS
+  Remove IPs not included in the GPL release.
+
