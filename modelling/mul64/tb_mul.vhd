@@ -1,6 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use ieee.math_real.all;
 use ieee.std_logic_arith.all;
 library gaisler;
 use gaisler.noelv.all;
@@ -46,10 +47,16 @@ begin
 
     mul_signals : process
     variable control : natural range 0 to 7;
+    variable seed1 : positive := 1;
+    variable seed2 : positive := 2;
+    variable seed3 : positive := 3;
+    variable seed4 : positive := 4;
+    variable rand1 : real;
+    variable rand2 : real;
     begin
         rstn <= '1';
         
-        wait for 140 ns;
+        wait for 60 ns;
         holdn <= '1';
         if (control = 7) then
             control := 0;
@@ -57,10 +64,16 @@ begin
                 control := control + 1;
         end if;
         ctrl <= conv_std_logic_vector(control, ctrl'length);
-        op1 <= conv_std_logic_vector(16#65985#, 32);
-        op2 <= conv_std_logic_vector(16#2#, 32);
+        uniform(seed1, seed2, rand1);
+        uniform(seed3, seed4, rand2);
+        op1 <= conv_std_logic_vector(integer(floor(rand1 * (8000.0 * 65535.0))), op1'length);
+        op2 <= conv_std_logic_vector(integer(floor(rand2 * (8000.0 * 65535.0))), op2'length);
        
-        wait for 20 ns;
+        wait for 100 ns;
+        holdn <= '0';
+        ctrl <= conv_std_logic_vector(0, ctrl'length);
+        op1 <= conv_std_logic_vector(0, op1'length);
+        op2 <= conv_std_logic_vector(0, op2'length);
     end process mul_signals;
 
 
