@@ -294,7 +294,7 @@ begin
           haddr       => L2C_HADDR,
           hmask       => L2C_HMASK,
           tech        => CFG_MEMTECH,
-          kbytes      => 16)
+          kbytes      => 1024)
         port map (
           rstn,
           clkm,
@@ -329,7 +329,7 @@ begin
           haddr    => L2C_HADDR,
           hmask    => L2C_HMASK,
           tech     => 0,
-          kbytes   => 16,
+          kbytes   => 1024,
           pipe     => 0,
           maccsz   => AHBDW,
           fname    => ramfile)
@@ -396,7 +396,7 @@ begin
         haddr    => ROM_HADDR,
         hmask    => ROM_HMASK,
         tech     => 0,
-        kbytes   => 16,
+        kbytes   => 1024,
         pipe     => 0,
         maccsz   => AHBDW,
         fname    => romfile)
