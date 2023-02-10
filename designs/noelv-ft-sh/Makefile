@@ -89,7 +89,7 @@ prom.exe: prom.elf
 
 ### Makefile Includes ##########################################################
 
-include $(GRLIB)/software/noelv/systest/Makefile
+include $(GRLIB)/software/noelv-ft-sh/complex-test/Makefile
 OBJCOPY_CMD = $(OBJCOPY)
 
 include $(GRLIB)/bin/Makefile

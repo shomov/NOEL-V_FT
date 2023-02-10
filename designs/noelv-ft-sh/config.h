@@ -96,20 +96,20 @@
  */
 #define CONFIG_NOELV 1
 #define CONFIG_PROC_NUM (1)
-#define CONFIG_NOELV_RV64 1
-#undef  CONFIG_NOELV_RV32
-#define CONFIG_NOELV_XLEN (64)
+#undef  CONFIG_NOELV_RV64
+#define CONFIG_NOELV_RV32 1
+#define CONFIG_NOELV_XLEN (32)
 #undef  CONFIG_NOELV_HP
-#define CONFIG_NOELV_GP 1
-#undef  CONFIG_NOELV_MC
-#define CONFIG_NOELV_FULL 1
-#undef  CONFIG_NOELV_LITE
-#define CONFIG_NOELV_DISSUE 1
-#undef  CONFIG_NOELV_SISSUE
-#define CONFIG_PROC_TYP (3)
-#define CONFIG_PROC_NOFPU (0)
-#define CONFIG_PROC_LITE (0)
-#define CONFIG_PROC_S (0)
+#undef  CONFIG_NOELV_GP
+#define CONFIG_NOELV_MC 1
+#undef  CONFIG_NOELV_FULL
+#define CONFIG_NOELV_LITE 1
+#undef  CONFIG_NOELV_FPU
+#define CONFIG_NOELV_NOFPU 1
+#define CONFIG_PROC_TYP (2)
+#define CONFIG_PROC_S (1)
+#define CONFIG_PROC_LITE (1)
+#define CONFIG_PROC_NOFPU (1)
 /*
  * VHDL debug settings       
  */
@@ -153,9 +153,9 @@
  * AMBA configuration
  */
 #define CONFIG_AHB_DEFMST (0)
-#define CONFIG_AHB_RROBIN 1
-#define CONFIG_AHB_SPLIT 1
-#define CONFIG_AHB_FPNPEN 1
+#undef  CONFIG_AHB_RROBIN
+#undef  CONFIG_AHB_SPLIT
+#undef  CONFIG_AHB_FPNPEN
 #define CONFIG_AHB_IOADDR FFF
 #define CONFIG_APB_HADDR 800
 #undef  CONFIG_AHB_MON
@@ -163,46 +163,26 @@
 /*
  * Debug Link           
  */
-#define CONFIG_DSU_UART 1
-#define CONFIG_DSU_JTAG 1
-#define CONFIG_DSU_ETH 1
-#undef  CONFIG_DSU_ETHSZ1
-#define CONFIG_DSU_ETHSZ2 1
-#undef  CONFIG_DSU_ETHSZ4
-#undef  CONFIG_DSU_ETHSZ8
-#undef  CONFIG_DSU_ETHSZ16
-#define CONFIG_DSU_IPMSB C0A8
-#define CONFIG_DSU_IPLSB 0033
-#define CONFIG_DSU_ETHMSB 020000
-#define CONFIG_DSU_ETHLSB 000000
-#undef  CONFIG_DSU_ETH_PROG
+#undef  CONFIG_DSU_UART
+#undef  CONFIG_DSU_JTAG
 /*
  * Peripherals             
  */
 /*
  * Memory controller             
  */
-#define CONFIG_AHBSTAT_ENABLE 1
-#define CONFIG_AHBSTAT_NFTSLV (1)
+#undef  CONFIG_AHBSTAT_ENABLE
 /*
  * Ethernet             
  */
-#define CONFIG_GRETH_ENABLE 1
-#undef  CONFIG_GRETH_GIGA
-#undef  CONFIG_GRETH_FIFO4
-#define CONFIG_GRETH_FIFO8 1
-#undef  CONFIG_GRETH_FIFO16
-#undef  CONFIG_GRETH_FIFO32
-#undef  CONFIG_GRETH_FIFO64
-#undef  CONFIG_GRETH_FMC_MODE
-#define CONFIG_GRETH_PHY_ADDR (1)
+#undef  CONFIG_GRETH_ENABLE
 /*
  * UARTs, timers and irq control         
  */
 #define CONFIG_GRGPIO_ENABLE 1
-#define CONFIG_GRGPIO_WIDTH (20)
+#define CONFIG_GRGPIO_WIDTH (16)
 #define CONFIG_GRGPIO_IMASK FFFE
 /*
  * VHDL Debugging        
  */
-#define CONFIG_DEBUG_UART 1
+#undef  CONFIG_DEBUG_UART
