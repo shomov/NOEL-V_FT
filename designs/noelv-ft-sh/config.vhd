@@ -55,7 +55,7 @@ package config is
   constant CFG_AHB_MONWAR : integer := 0;
   constant CFG_AHB_DTRACE : integer := 0;
 -- DSU UART
-  constant CFG_AHB_UART : integer := 0;
+  constant CFG_AHB_UART : integer := 1;
 -- JTAG based DSU interface
   constant CFG_AHB_JTAG : integer := 0;
 -- Ethernet DSU
@@ -79,5 +79,5 @@ package config is
   constant CFG_GRGPIO_IMASK : integer := 16#FFFE#;
   constant CFG_GRGPIO_WIDTH : integer := (16);
 -- GRLIB debugging
-  constant CFG_DUART : integer := 0;
+  constant CFG_DUART : integer := 1;
 end;

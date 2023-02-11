@@ -33,8 +33,8 @@ XCC = $(RISCV_PREFIX)gcc $(XINC)
 XAS = $(RISCV_PREFIX)gcc -c -I. $(XINC)
 XAR = $(RISCV_PREFIX)ar
 SYSTEST_DEFINES = -DNOELV_SYSTEST -DSYSTEST_TYPE=GRETH_SYSTEST -DGRLIB_REPORTDEV_BASE=0x80000000ULL -DAPBUART_ADDR_SYSTEST=0xfc001000ULL -DGRETH_ADDR_SYSTEST=0xfc084000ULL
-XCFLAGS = -mcmodel=medany -static -std=gnu99 -O3 -march=$(RISCV_ARCH) -mabi=$(RISCV_ABI) $(SYSTEST_DEFINES) #-Wl,--no-gc-sections
-XCFLAGS_PROM = -mcmodel=medany -static -std=gnu99 -O2 -march=$(RISCV_ARCH) -mabi=$(RISCV_ABI) -Wl,--no-gc-sections -nostdlib
+XCFLAGS = -mcmodel=medany -static -std=gnu99 -O0 -march=$(RISCV_ARCH) -mabi=$(RISCV_ABI) $(SYSTEST_DEFINES) #-Wl,--no-gc-sections
+XCFLAGS_PROM = -mcmodel=medany -static -std=gnu99 -O0 -march=$(RISCV_ARCH) -mabi=$(RISCV_ABI) -Wl,--no-gc-sections -nostdlib
 
 ifeq ("$(LD)", "")
 	LDFLAGS = -qbsp=2020q4
@@ -60,7 +60,7 @@ SECTIONS = --remove-section=.comment --remove-section=.riscv.attributes
 DTB = noelv.dtb
 
 PROGS = 
-OBJDIR = ./obj/
+OBJDIR = ./obj
 SRCDIR = $(GRLIB)/software/noelv-ft-sh/complex-test/sw
 PROGS = 
 SRCFILES = $(wildcard $(SRCDIR)/*.c)
