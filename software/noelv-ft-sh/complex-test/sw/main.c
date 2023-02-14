@@ -24,32 +24,39 @@
 static volatile int *pio;
 
 int main() {
+  int res = 0;
+
   while (1) {
-    __asm__ __volatile__("ADDI x0, x0, 0");		//NOP
+  //   __asm__ __volatile__("ADDI x0, x0, 0");		//NOP
+
 	
-        pio = (int *) 0x830; 
-        /*
-         * pio[0] = din
-         * pio[1] = dout
-         * pio[2] = dir
-         * pio[3] = imask
-         * pio[4] = level
-         * pio[5] = edge
-         * pio[6] = bypass
-         * pio[7] = reserved
-         * pio[8] = irqmap
-         */
+    pio = (int *) 0xfc083000; 
+    // pio = (int *) 0x860; 
+    /*
+     * pio[0] = din
+     * pio[1] = dout
+     * pio[2] = dir
+     * pio[3] = imask
+     * pio[4] = level
+     * pio[5] = edge
+     * pio[6] = bypass
+     * pio[7] = reserved
+     * pio[8] = irqmap
+     */
 
-        int mask;
-        int width;
-        
-        pio[3] = 0; 
-        pio[2] = 0;
-        pio[1] = 0;  
+    // int mask;
+    // int width;
+    
+    // pio[3] = 0; 
+    // pio[2] = 0;
+    // pio[1] = 0;  
   
-        pio[2] = 0xFFFFFFFF;
+    pio[2] = 0xFFFFFFFF;
 
-        pio[1] = 0x89ABCDEF;
+    pio[1] = res;
+
+    res = res + 13;
+
   }
 	return 0;
 }
