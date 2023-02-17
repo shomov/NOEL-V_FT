@@ -1,6 +1,3 @@
-#include <stdio.h>
-
-
 /*
  *
  * For testing NOELV-based designs, the macro NOELV_SYSTEST must be defined.
@@ -21,16 +18,23 @@
  * SYSTEST_TYPE definition and the double quotes for the SYSTEST_DEFINES).
  *
  */
+
+#include "printf.h"
+
 static volatile int *pio;
 
 int main() {
-  int res = 0;
+  
+  unsigned int res = 0;
+  uart_init(0xfc001000);
+
+  printf("Hello, NOEL-V!\n");
 
   while (1) {
   //   __asm__ __volatile__("ADDI x0, x0, 0");		//NOP
-
+    __asm__ volatile ("rdcycle %0;" : "=r"(res));
 	
-    pio = (int *) 0xfc083000; 
+    pio = (int *) 0xfc083000; //neesh
     // pio = (int *) 0x860; 
     /*
      * pio[0] = din
@@ -55,7 +59,7 @@ int main() {
 
     pio[1] = res;
 
-    res = res + 13;
+  // printf("LOOP\n");
 
   }
 	return 0;
