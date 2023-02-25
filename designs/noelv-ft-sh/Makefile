@@ -33,7 +33,7 @@ SIMTOP=testbench
 GRLIB_SIMULATOR ?= ModelSim
 
 # Options used during compilation
-VCOMOPT=-explicit -O0
+VCOMOPT=-explicit
 
 # GRLIB Options
 VSIMOPT=
@@ -89,7 +89,7 @@ prom.exe: prom.elf
 
 ### Makefile Includes ##########################################################
 
-include $(GRLIB)/software/noelv-ft-sh/complex-test/Makefile
+include $(GRLIB)/software/noelv-ft-sh/coremark-riscv/Makefile
 OBJCOPY_CMD = $(OBJCOPY)
 
 include $(GRLIB)/bin/Makefile
