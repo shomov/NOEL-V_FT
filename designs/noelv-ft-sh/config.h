@@ -180,9 +180,9 @@
  * UARTs, timers and irq control         
  */
 #define CONFIG_GRGPIO_ENABLE 1
-#define CONFIG_GRGPIO_WIDTH (4)
+#define CONFIG_GRGPIO_WIDTH (16)
 #define CONFIG_GRGPIO_IMASK FFFE
 /*
  * VHDL Debugging        
  */
-#undef  CONFIG_DEBUG_UART
+#define CONFIG_DEBUG_UART 1

@@ -1,0 +1,4 @@
+[submodule "software/noelv-ft-sh/coremark-riscv"]
+	path = software/noelv-ft-sh/coremark-riscv
+	url = https://github.com/shomov/coremark-riscv
+	branch = NOEL-V

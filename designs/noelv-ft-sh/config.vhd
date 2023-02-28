@@ -77,7 +77,7 @@ package config is
 -- GPIO port
   constant CFG_GRGPIO_ENABLE : integer := 1;
   constant CFG_GRGPIO_IMASK : integer := 16#FFFE#;
-  constant CFG_GRGPIO_WIDTH : integer := (4);
+  constant CFG_GRGPIO_WIDTH : integer := (16);
 -- GRLIB debugging
-  constant CFG_DUART : integer := 0;
+  constant CFG_DUART : integer := 1;
 end;
