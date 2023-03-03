@@ -34,7 +34,7 @@ function tcl_gen (file, area, faults, signals)
         sig_line = randi([0, dimension(s)-1]);
         sig_name = sprintf("%s(%d)", char(signal(s)), sig_line);
         fprintf(fid, "when { $now = %dns } {\n", randi([area(1), area(2)]));
-        fprintf(fid, "\tforce -freeze %s %d 0 -cancel %dns\n", sig_name, randi([0, 1]), FAULT_LENGTH);
+        fprintf(fid, "\tforce -drive %s %d 0 -cancel %dns\n", sig_name, randi([0, 1]), FAULT_LENGTH);
         fprintf(fid, "}\n");
       endfor
   endfor
