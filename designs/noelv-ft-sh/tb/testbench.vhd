@@ -22,6 +22,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use std.textio.all;
+use std.env.finish;
 library gaisler;
 use gaisler.libdcom.all;
 use gaisler.sim.all;
@@ -95,14 +96,38 @@ architecture behav of testbench is
   signal cpu0errn       : std_logic; 
 
 
+
 begin
+
+
+  iteration_ctrl : process
+    -- Iterations
+    variable iteration      : integer := 0;
+    variable success_iter   : integer := 0;
+  begin
+
+    BM_iter: while (iteration /= 10) loop
+      iteration := iteration + 1;
+      system_rst  <= '0';
+      wait for 10 ns;
+      system_rst  <= '1';
+      wait for (5 ms - 10 ns);
+      
+      if to_integer(unsigned(gpio)) = 3 then
+        success_iter := success_iter + 1;
+        report "Success! Iteration " & integer'image(iteration);
+      else
+        report "Failure! Iteration " & integer'image(iteration);
+      end if;
+    end loop BM_iter;
+
+  end process;
 
   -----------------------------------------------------
   -- Clocks and Reset ---------------------------------
   -----------------------------------------------------
 
   clk         <= not clk after 5 ns;
-  system_rst  <= '0', '1' after 200 ns;
 
   -----------------------------------------------------
   -- Misc ---------------------------------------------
@@ -122,7 +147,7 @@ begin
       padtech           => padtech,
       clktech           => clktech,
       disas             => disas,
-      SIMULATION        => 1,
+      SIMULATION        => 0,
       romfile           => romfile,
       ramfile           => ramfile
       )
@@ -154,20 +179,6 @@ begin
       dmreset           => dmreset,
       cpu0errn          => cpu0errn
       );
-
-  phy0 : if (CFG_GRETH = 1) generate
-    emdio     <= 'H';
-    erxd      <= erxd_tmp(3 downto 0);
-    etxd_tmp  <= "0000" & etxd;
-    
-    p0: phy
-      generic map(
-        address       => 1,
-        base1000_t_fd => 0,
-        base1000_t_hd => 0)
-      port map(system_rst, emdio, etx_clk, erx_clk, erxd_tmp, erx_dv,
-      erx_er, erx_col, erx_crs, etxd_tmp, etx_en, etx_er, emdc, gtx_clk);
-  end generate;
 
   -----------------------------------------------------
   -- Process ------------------------------------------
