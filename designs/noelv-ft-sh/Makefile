@@ -33,7 +33,7 @@ SIMTOP=testbench
 GRLIB_SIMULATOR ?= ModelSim
 
 # Options used during compilation
-VCOMOPT=-explicit
+VCOMOPT=-explicit 
 
 # GRLIB Options
 VSIMOPT=

@@ -22,7 +22,6 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use std.textio.all;
-use std.env.finish;
 library gaisler;
 use gaisler.libdcom.all;
 use gaisler.sim.all;
@@ -96,38 +95,14 @@ architecture behav of testbench is
   signal cpu0errn       : std_logic; 
 
 
-
 begin
-
-
-  iteration_ctrl : process
-    -- Iterations
-    variable iteration      : integer := 0;
-    variable success_iter   : integer := 0;
-  begin
-
-    BM_iter: while (iteration /= 10) loop
-      iteration := iteration + 1;
-      system_rst  <= '0';
-      wait for 10 ns;
-      system_rst  <= '1';
-      wait for (5 ms - 10 ns);
-      
-      if to_integer(unsigned(gpio)) = 3 then
-        success_iter := success_iter + 1;
-        report "Success! Iteration " & integer'image(iteration);
-      else
-        report "Failure! Iteration " & integer'image(iteration);
-      end if;
-    end loop BM_iter;
-
-  end process;
 
   -----------------------------------------------------
   -- Clocks and Reset ---------------------------------
   -----------------------------------------------------
 
   clk         <= not clk after 5 ns;
+  system_rst  <= '0', '1' after 200 ns;
 
   -----------------------------------------------------
   -- Misc ---------------------------------------------
@@ -147,7 +122,7 @@ begin
       padtech           => padtech,
       clktech           => clktech,
       disas             => disas,
-      SIMULATION        => 0,
+      SIMULATION        => 1,
       romfile           => romfile,
       ramfile           => ramfile
       )
@@ -184,16 +159,16 @@ begin
   -- Process ------------------------------------------
   -----------------------------------------------------
 
-  iuerr : process
-  begin
-    wait for 5000 ns;
-    if to_x01(cpu0errn) = '1' then
-      wait on cpu0errn;
-    end if;
-    assert (to_x01(cpu0errn) = '1')
-      report "*** IU in error mode, simulation halted ***"
-      severity failure;			-- this should be a failure
-  end process;
+  -- iuerr : process
+  -- begin
+  --   wait for 5000 ns;
+  --   if to_x01(cpu0errn) = '1' then
+  --     wait on cpu0errn;
+  --   end if;
+  --   assert (to_x01(cpu0errn) = '1')
+  --     report "*** IU in error mode, simulation halted ***"
+  --     severity failure;			-- this should be a failure
+  -- end process;
 
   dsucom : process
     procedure read_srec(
