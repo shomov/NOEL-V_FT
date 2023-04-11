@@ -45,9 +45,9 @@ package config is
   constant CFG_L2_AXI : integer := 0;
 -- AMBA settings
   constant CFG_DEFMST : integer := (0);
-  constant CFG_RROBIN : integer := 0;
-  constant CFG_SPLIT : integer := 0;
-  constant CFG_FPNPEN : integer := 0;
+  constant CFG_RROBIN : integer := 1;
+  constant CFG_SPLIT : integer := 1;
+  constant CFG_FPNPEN : integer := 1;
   constant CFG_AHBIO : integer := 16#FFF#;
   constant CFG_APBADDR : integer := 16#800#;
   constant CFG_AHB_MON : integer := 0;

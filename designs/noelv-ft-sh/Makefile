@@ -42,7 +42,8 @@ VSIMOPT=
 ifeq ("$(GRLIB_SIMULATOR)","ALDEC")
 VSIMOPT+= +access +w -voptargs="+acc" +notimingchecks
 else
-VSIMOPT+=-voptargs="+acc -nowarn 1" +notimingchecks
+VSIMOPT+= +notimingchecks
+# VSIMOPT+=-voptargs="+acc -nowarn 1" +notimingchecks
 endif
 
 # Simulation scripts
