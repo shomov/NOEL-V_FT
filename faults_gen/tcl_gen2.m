@@ -15,14 +15,15 @@ function tcl_gen2 (iter, start, finish)
         sig_name = signals(sig_num);
         if (sig_num == length(signals))
           sig_name = signals(sig_num);
+        else
+          k = 1;
+          while (sig_num + k < length(signals)-1 && strfind(char(signals(sig_num+k)), char(signals(sig_num+k-1))))
+            sig_name = signals(sig_num+k);
+            if (k < length(signals)-1)
+              k = k + 1;
+            endif
+          endwhile
         endif
-        k = 1;
-        while (sig_num + k < length(signals)-1 && strfind(char(signals(sig_num+k)), char(signals(sig_num+k-1))))
-          sig_name = signals(sig_num+k);
-          if (k < length(signals)-1)
-            k = k + 1;
-          endif
-        endwhile
         fprintf(fid, "%s %d\n", char(sig_name), randi([start, finish]));
       endfor
     fflush(fid);
