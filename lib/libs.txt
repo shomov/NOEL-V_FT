@@ -1,3 +1,4 @@
+extras
 #tech/dware
 synplify
 techmap           vhdlstd=93
