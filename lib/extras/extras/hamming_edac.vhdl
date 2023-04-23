@@ -427,7 +427,7 @@ package body hamming_edac is
     variable parity_ix : positive := 1;
   begin
     assert data_desc'length = hamming_data_size(MESSAGE_SIZE)
-      report "Data and message size mismatch"
+      report "Data and message size mismatch " & integer'image(integer(data_desc'length)) & " != " & integer'image(integer(hamming_data_size(MESSAGE_SIZE)))
       severity failure;
 
     for i in msg'reverse_range loop

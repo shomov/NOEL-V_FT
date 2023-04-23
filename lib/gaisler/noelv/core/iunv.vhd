@@ -698,11 +698,12 @@ architecture rtl of iunv is
   );
 
   type pipeline_ctrl_lanes_type is array (lanes'range) of pipeline_ctrl_type;
-
+  constant WORD_ECC : ecc_range := hamming_indices(pctype'length);
   -- PC Gen <-> Fetch Stage --------------------------------------------------
   type fetch_reg_type is record
     -- pc          : pctype;                             -- pc to be fetched
-    pc      : ecc_vector(hamming_message_size(pctype'length)-1 downto 0);                         -- pc to be fetched
+    -- pc          : ecc_vector(hamming_message_size(pctype'length)-1 downto 0);                         -- pc to be fetched
+    pc : ecc_vector(WORD_ECC.left downto WORD_ECC.right);
     valid       : std_ulogic_vector(2 downto 0);                         -- valid fetch request
   end record;
 
@@ -1009,6 +1010,17 @@ architecture rtl of iunv is
     tbufaddr    : std_logic_vector(TBUFBITS - 1 downto 0);   -- Trace buffer readout address
   end record;
 
+  -- Faults flag --------------------------------------------------------------
+  type stage_fault is record
+    f       : boolean;
+    d       : boolean;
+    a       : boolean;
+    e       : boolean;
+    m       : boolean;
+    x       : boolean;
+    wb      : boolean;
+  end record;
+
   -- All Stages ---------------------------------------------------------------
   type registers is record
     f       : fetch_reg_type;
@@ -1026,6 +1038,7 @@ architecture rtl of iunv is
     evtirq  : std_logic_vector(0 to perf_cnts + 3 - 1);  -- 0-2 not used
     fpo     : fpu5_out_type;    -- FPU output, for logging
     fpflush : std_logic_vector(4 downto 0);
+    faults         : stage_fault; -- Fault detection signals
   end record;
 
   ----------------------------------------------------------------------------
@@ -1205,6 +1218,7 @@ architecture rtl of iunv is
   ----------------------------------------------------------------------------
 
   signal r, rin         : registers;
+  signal faults_stage         : stage_fault;
   signal arst           : std_ulogic;
 
   -- Hart index
@@ -10574,7 +10588,7 @@ begin
 
     -- Generate Nullify for Instruction Cache -----------------------------
     f_pb_exec := to_bit((dmen = 1) and (r.x.rstate = dexec) and -- Execute from program buffer?
-                        (get_raw_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 7) = std_ulogic_vector(DPROGBUF(pctype'high downto 7))));
+                        (get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 7) = std_ulogic_vector(DPROGBUF(pctype'high downto 7))));
     if (not rstn   or          -- Reset
         de_hold_pc or          -- Hold PC due to Instruction buffer, RVC alignment or dhalt
         not tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)) or       -- Inull during the first cycle after reset
@@ -10590,7 +10604,7 @@ begin
           v.d.inst(0) := ico.data(i);
           if single_issue /= 0 then
             v.d.inst(0)(31 downto 0) := ico.data(i)(31 downto 0);
-            if get_raw_data(r.f.pc)(2) = '1' then
+            if get_data(r.f.pc)(2) = '1' then
               v.d.inst(0)(31 downto 0) := ico.data(i)(63 downto 32);
             end if;
             if ico.mds = '0' then
@@ -10613,7 +10627,7 @@ begin
         v.d.inst(0)   := dbgi.pbdata;
         if single_issue /= 0 then
           v.d.inst(0)(31 downto 0) := dbgi.pbdata(31 downto 0);
-          if get_raw_data(r.f.pc)(2) = '1' then
+          if get_data(r.f.pc)(2) = '1' then
             v.d.inst(0)(31 downto 0) := dbgi.pbdata(63 downto 32);
           end if;
         end if;
@@ -10636,7 +10650,7 @@ begin
     end if;
 
 
-    v.d.pc := pctype(get_raw_data(r.f.pc));--TODO ?
+    v.d.pc := pctype(get_data(r.f.pc));--TODO ?
 
     if de_rvc_hold = '1' then
       v.d.pc := r.d.pc(r.d.pc'high downto 3) & de_rvc_npc;
@@ -10696,7 +10710,7 @@ begin
     end if;
 
     if v.d.buff.valid = '1' and v.d.unaligned = '1' then
-      v.d.pc := std_logic_vector(get_raw_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 2) & "10");
+      v.d.pc := std_logic_vector(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 2) & "10");
     end if;
 
     if tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)) = '1' then
@@ -10758,7 +10772,7 @@ begin
     -- Valid Instruction for BTB
     de_btb_valid     := (others => '0');
     if tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)) = '1' then
-      r_f_pc_21 := word2(get_raw_data(r.f.pc)(2 downto 1));
+      r_f_pc_21 := word2(get_data(r.f.pc)(2 downto 1));
       case r_f_pc_21 is
         when "00" =>
           de_btb_valid := "1111";
@@ -10909,14 +10923,14 @@ begin
       v.f.pc     := hamming_encode(std_ulogic_vector(de_target));
     -- Incremental PC ------------------------------------------------------
     else
-      v.f.pc     := hamming_encode(std_ulogic_vector(npc(pctype(get_raw_data(r.f.pc)))));
+      v.f.pc     := hamming_encode(std_ulogic_vector(npc(pctype(get_data(r.f.pc)))));
     end if;
 
     -- v.f.pc and next_pc must be decoupled in order to remove de_hold_pc from the
     -- address path.
     reread_pc   := '0';
     if xc_rstn = '0' or tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)) = '0' then
-      next_pc   := pctype(get_raw_data(r.f.pc));
+      next_pc   := pctype(get_data(r.f.pc));
       reread_pc := '1';
     -- Exception/Interrupt -------------------------------------------------
     elsif x_xc_taken = '1' then
@@ -10937,7 +10951,7 @@ begin
       next_pc   := de_target;
     -- Incremental PC ------------------------------------------------------
     else
-      next_pc   := npc(pctype(get_raw_data(r.f.pc)));
+      next_pc   := npc(pctype(get_data(r.f.pc)));
     end if;
 
 
@@ -11006,14 +11020,14 @@ begin
     bhti.iustall      <= iustall;
 
     -- To Branch Target Buffer ---------------------------------------------
-    btbi.raddr  <= pc2xlen(pctype(get_raw_data(r.f.pc)));
+    btbi.raddr  <= pc2xlen(pctype(get_data(r.f.pc)));
 
     -- To ICache -----------------------------------------------------------
     ici.dpc                        <= (others => '0');
     ici.fpc                        <= (others => '0');
     ici.rpc                        <= (others => '0');
     ici.dpc(r.d.pc'high downto 3)  <= r.d.pc(r.d.pc'high downto 3);
-    ici.fpc(hamming_data_size(r.f.pc'length)-1 downto 3)  <= std_logic_vector(get_raw_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 3));
+    ici.fpc(hamming_data_size(r.f.pc'length)-1 downto 3)  <= std_logic_vector(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 3));
     ici.rpc(next_pc'high downto 3) <= next_pc(next_pc'high downto 3);
     ici.nostream                   <= reread_pc or r.csr.dfeaturesen.nostream;
 
@@ -11562,7 +11576,7 @@ begin
       dbgo.derr         <= dbg_derr;
       dbgo.dexec_done   <= dbg_dexec_done;
       dbgo.stoptime     <= dbg_stoptime;
-      dbgo.pbaddr       <= std_logic_vector(get_raw_data(r.f.pc)(6 downto 2));
+      dbgo.pbaddr       <= std_logic_vector(get_data(r.f.pc)(6 downto 2));
       dbgo.mcycle       <= r.csr.mcycle(63 downto 0);
     else
       dbgo              <= nv_debug_out_none;
@@ -11645,6 +11659,9 @@ begin
     fpui                <= vfpui;
 
 
+    -- Fault detection ----------------------------------------------------
+    -- v.faults.f := hamming_has_error(r.f.pc);
+    faults_stage.f <= hamming_has_error(r.f.pc);
 
   end process;
 
@@ -11655,6 +11672,7 @@ begin
     begin
       if rising_edge(clk) then
         if holdn = '1' then
+          -- faults_stage.f <= hamming_has_error(r.f.pc);
           r                <= rin;
         else
           -- Some things need to be updated even during hold.
@@ -11711,7 +11729,7 @@ begin
             if DYNRST then
               -- r.f.pc(r.f.pc'high downto 12) <= RST_VEC(RST_VEC'high downto 12);
               
-              r.f.pc <= hamming_encode(std_ulogic_vector(RST_VEC(RST_VEC'high downto 12)) & get_raw_data(r.f.pc)(12 downto 0));
+              r.f.pc <= hamming_encode(std_ulogic_vector(RST_VEC(RST_VEC'high downto 12)) & get_data(r.f.pc)(12 downto 0));
               
               r.d.pc(r.d.pc'high downto 12) <= RST_VEC(RST_VEC'high downto 12);
             end if;
