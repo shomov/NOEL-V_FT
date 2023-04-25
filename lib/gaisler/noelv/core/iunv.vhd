@@ -1038,7 +1038,6 @@ architecture rtl of iunv is
     evtirq  : std_logic_vector(0 to perf_cnts + 3 - 1);  -- 0-2 not used
     fpo     : fpu5_out_type;    -- FPU output, for logging
     fpflush : std_logic_vector(4 downto 0);
-    faults         : stage_fault; -- Fault detection signals
   end record;
 
   ----------------------------------------------------------------------------
@@ -1218,7 +1217,7 @@ architecture rtl of iunv is
   ----------------------------------------------------------------------------
 
   signal r, rin         : registers;
-  signal faults_stage         : stage_fault;
+  -- signal faults_stage         : stage_fault;
   signal arst           : std_ulogic;
 
   -- Hart index
@@ -6202,7 +6201,9 @@ architecture rtl of iunv is
                                 accesshold : inout std_logic_vector;
                                 exechold   : inout std_logic_vector;
                                 fpuhold    : inout std_logic_vector;
-                                holdi      : out   std_ulogic) is
+                                holdi      : out   std_ulogic;
+                                iu_fault   : out   std_ulogic
+                                ) is
     -- Non-constant
     variable hold      : std_ulogic    := '0';
     variable hvec      : word16        := (others => '0');  -- Only for debug
@@ -6213,6 +6214,8 @@ architecture rtl of iunv is
     variable lalu      : fetch_pair    := (others => '0');
     variable laludp    : std_ulogic    := '0';  -- Lane 1 is dependent on lane 0 (no swap)
     variable csrw_eq   : std_ulogic    := '0';
+    variable faults    : stage_fault   := (others => FALSE);
+    variable fault     : std_ulogic    := '0';
   begin
     lddp     := '0';
     sdb2b    := '0';
@@ -6784,7 +6787,14 @@ architecture rtl of iunv is
       lbranch   := '0';
     end if;
 
+    -- Faults detection 
+    if hamming_has_error(r.f.pc) then
+      fault := '1';
+      hold := '1';
+    end if;
 
+
+    iu_fault    := fault;
     holdi       := hold;
     lbrancho    := lbranch and not(r.csr.dfeaturesen.lbranch_dis);
     laluo       := lcsr or (lalu and (lalu'range => not(r.csr.dfeaturesen.lalu_dis)));
@@ -7912,6 +7922,7 @@ begin
     variable ic_hold_issue      : std_ulogic;
     variable ic_lbranch         : std_ulogic;
     variable ic_lalu            : fetch_pair;
+    variable ic_fault      : std_ulogic;
 
     -- Register File
     variable rfi_raddr12        : rfa_lanes_type;
@@ -9777,7 +9788,8 @@ begin
                         v.e.accesshold, -- out : Memory access hold due to CSR changes.
                         v.e.exechold,   -- out : Execution hold due to pipeline flushing instruction.
                         v.e.fpuhold,    -- out : Execution hold due to FPU instructions.
-                        ic_hold_issue   -- out : Hold Issue Signal
+                        ic_hold_issue,  -- out : Hold Issue Signal
+                        ic_fault
                         );
 
     -- To the ALUs --------------------------------------------------------
@@ -11223,7 +11235,11 @@ begin
     -- Bubble after A stage if instruction control says so.
     if ic_hold_issue = '1' and ra_flush = '0' then
       -- Stall stages
-      v.f := r.f;
+      if ic_fault = '1' then
+        v.f.pc     := hamming_encode(hamming_decode(r.f.pc));
+      else
+        v.f := r.f;
+      end if;
       v.d := r.d;
       v.a := r.a;
       -- Bubbles in Execute Stage
@@ -11659,9 +11675,6 @@ begin
     fpui                <= vfpui;
 
 
-    -- Fault detection ----------------------------------------------------
-    -- v.faults.f := hamming_has_error(r.f.pc);
-    faults_stage.f <= hamming_has_error(r.f.pc);
 
   end process;
 
@@ -11672,7 +11685,6 @@ begin
     begin
       if rising_edge(clk) then
         if holdn = '1' then
-          -- faults_stage.f <= hamming_has_error(r.f.pc);
           r                <= rin;
         else
           -- Some things need to be updated even during hold.
