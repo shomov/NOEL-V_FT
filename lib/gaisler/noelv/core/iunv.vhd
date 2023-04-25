@@ -171,7 +171,9 @@ entity iunv is
     fpu_debug    : integer range 0  to 1 := 0;   -- FCSR bits for controlling the FPU
     fpu_lane     : integer range 0  to 1 := 0;   -- Lane where (non-memory) FPU instructions go
     csr_lane     : integer range 0  to 1 := 0;   -- Lane where CSRs are handled
-    endian       : integer range 0  to 1         -- 1 - little endian
+    endian       : integer range 0  to 1;        -- 1 - little endian
+
+    fault_protection : integer range 0  to 1 := 1
     );
   port (
     clk            : in  std_ulogic;           -- clk
@@ -6788,10 +6790,13 @@ architecture rtl of iunv is
     end if;
 
     -- Faults detection 
-    if hamming_has_error(r.f.pc) then
-      fault := '1';
-      hold := '1';
+    if fault_protection = 1 then
+      if hamming_has_error(r.f.pc) then
+        fault := '1';
+        hold := '1';
+      end if;
     end if;
+    
 
 
     iu_fault    := fault;
@@ -11235,11 +11240,14 @@ begin
     -- Bubble after A stage if instruction control says so.
     if ic_hold_issue = '1' and ra_flush = '0' then
       -- Stall stages
+      
+      -- Elimination of failures  
       if ic_fault = '1' then
         v.f.pc     := hamming_encode(hamming_decode(r.f.pc));
       else
         v.f := r.f;
       end if;
+
       v.d := r.d;
       v.a := r.a;
       -- Bubbles in Execute Stage

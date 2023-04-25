@@ -29,10 +29,11 @@ set result(10) "results/res_evt.fout"
 set result(11) "results/res_cevt.fout"
 set result(12) "results/res_evtirq.fout"
 
-run 109.5us;
+set noel_ready 109500
+run $noel_ready;
 checkpoint hello;
 
-for { set file_fault 1 }  { $file_fault < [array size faults] }  { incr file_fault } {
+for { set file_fault 0 }  { $file_fault < [array size faults] }  { incr file_fault } {
     set outfile [open "$result($file_fault)" w+]
 
     set iter 0;
@@ -49,8 +50,9 @@ for { set file_fault 1 }  { $file_fault < [array size faults] }  { incr file_fau
     foreach sig_line $splitCont {
         if {[regexp {([._\-:a-z0-9\/\(\)]+)\s+([0-9]+)} $sig_line -> signal time]} {
             restore hello;
-            force -deposit $signal [examine ~$signal] "@ $time ns"
-            run 15220ns;
+            run @[expr { $time - 1 }];
+            force -deposit $signal [examine ~$signal] "@ $time"
+            run @[expr { $noel_ready + 15220 }];
             set gpio1 [examine /testbench/cpu/core0/gpio_o(1)]
             set gpio0 [examine /testbench/cpu/core0/gpio_o(0)]
             if { $gpio1 == 1 && $gpio0 == 1 } {
@@ -58,10 +60,10 @@ for { set file_fault 1 }  { $file_fault < [array size faults] }  { incr file_fau
             } else {
                 puts $outfile "$signal $time"
             }
+            incr iter
         } else {
             puts "wrong $sig_line"
         }
-        incr iter
     }
     puts $outfile "$success/$iter"
     close $outfile
@@ -69,4 +71,4 @@ for { set file_fault 1 }  { $file_fault < [array size faults] }  { incr file_fau
 
 
 
-# quit;
+quit;
