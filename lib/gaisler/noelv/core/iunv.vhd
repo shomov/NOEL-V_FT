@@ -702,10 +702,8 @@ architecture rtl of iunv is
   type pipeline_ctrl_lanes_type is array (lanes'range) of pipeline_ctrl_type;
   constant WORD_ECC : ecc_range := hamming_indices(pctype'length);
   -- PC Gen <-> Fetch Stage --------------------------------------------------
-  type fetch_reg_type is record
-    -- pc          : pctype;                             -- pc to be fetched
-    -- pc          : ecc_vector(hamming_message_size(pctype'length)-1 downto 0);                         -- pc to be fetched
-    pc : ecc_vector(WORD_ECC.left downto WORD_ECC.right);
+  type fetch_reg_type is record                       
+    pc : ecc_vector(WORD_ECC.left downto WORD_ECC.right);                -- pc to be fetched
     valid       : std_ulogic_vector(2 downto 0);                         -- valid fetch request
   end record;
 
@@ -1022,6 +1020,8 @@ architecture rtl of iunv is
     x       : boolean;
     wb      : boolean;
   end record;
+
+  constant faults_none : stage_fault := (others => FALSE);
 
   -- All Stages ---------------------------------------------------------------
   type registers is record
@@ -6204,7 +6204,7 @@ architecture rtl of iunv is
                                 exechold   : inout std_logic_vector;
                                 fpuhold    : inout std_logic_vector;
                                 holdi      : out   std_ulogic;
-                                iu_fault   : out   std_ulogic
+                                iu_fault   : out   stage_fault
                                 ) is
     -- Non-constant
     variable hold      : std_ulogic    := '0';
@@ -6217,7 +6217,7 @@ architecture rtl of iunv is
     variable laludp    : std_ulogic    := '0';  -- Lane 1 is dependent on lane 0 (no swap)
     variable csrw_eq   : std_ulogic    := '0';
     variable faults    : stage_fault   := (others => FALSE);
-    variable fault     : std_ulogic    := '0';
+    -- variable fault     : std_ulogic    := '0';
   begin
     lddp     := '0';
     sdb2b    := '0';
@@ -6791,15 +6791,16 @@ architecture rtl of iunv is
 
     -- Faults detection 
     if fault_protection = 1 then
-      if hamming_has_error(r.f.pc) then
-        fault := '1';
-        hold := '1';
-      end if;
+        if hamming_has_error(r.f.pc) or r.f.valid(0) /= r.f.valid(1) or r.f.valid(0) /= r.f.valid(2) or r.f.valid(1) /= r.f.valid(2) then
+          faults.f := TRUE;
+          hold := '1';
+        end if;
+
     end if;
     
 
 
-    iu_fault    := fault;
+    iu_fault    := faults;
     holdi       := hold;
     lbrancho    := lbranch and not(r.csr.dfeaturesen.lbranch_dis);
     laluo       := lcsr or (lalu and (lalu'range => not(r.csr.dfeaturesen.lalu_dis)));
@@ -7927,7 +7928,7 @@ begin
     variable ic_hold_issue      : std_ulogic;
     variable ic_lbranch         : std_ulogic;
     variable ic_lalu            : fetch_pair;
-    variable ic_fault      : std_ulogic;
+    variable ic_fault           : stage_fault;
 
     -- Register File
     variable rfi_raddr12        : rfa_lanes_type;
@@ -10608,7 +10609,7 @@ begin
                         (get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 7) = std_ulogic_vector(DPROGBUF(pctype'high downto 7))));
     if (not rstn   or          -- Reset
         de_hold_pc or          -- Hold PC due to Instruction buffer, RVC alignment or dhalt
-        not tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)) or       -- Inull during the first cycle after reset
+        not r.f.valid(0) or       -- Inull during the first cycle after reset
         f_pb_exec) = '1' then  -- Program buffer fetch
       de_inull := '1';
     end if;
@@ -10730,7 +10731,7 @@ begin
       v.d.pc := std_logic_vector(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 2) & "10");
     end if;
 
-    if tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)) = '1' then
+    if r.f.valid(0) = '1' then
       v.d.valid := '1';
     end if;
 
@@ -10788,7 +10789,7 @@ begin
 
     -- Valid Instruction for BTB
     de_btb_valid     := (others => '0');
-    if tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)) = '1' then
+    if r.f.valid(0) = '1' then
       r_f_pc_21 := word2(get_data(r.f.pc)(2 downto 1));
       case r_f_pc_21 is
         when "00" =>
@@ -10916,7 +10917,7 @@ begin
 
     -- Hierarchical Second Stage
     -- Exception Reset -----------------------------------------------------
-    if xc_rstn = '0' or tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)) = '0' then
+    if xc_rstn = '0' or r.f.valid(0) = '0' then
       v.f.pc     := r.f.pc;
     -- Exception/Interrupt -------------------------------------------------
     elsif x_xc_taken = '1' then
@@ -10946,7 +10947,7 @@ begin
     -- v.f.pc and next_pc must be decoupled in order to remove de_hold_pc from the
     -- address path.
     reread_pc   := '0';
-    if xc_rstn = '0' or tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)) = '0' then
+    if xc_rstn = '0' or r.f.valid(0) = '0' then
       next_pc   := pctype(get_data(r.f.pc));
       reread_pc := '1';
     -- Exception/Interrupt -------------------------------------------------
@@ -11242,8 +11243,9 @@ begin
       -- Stall stages
       
       -- Elimination of failures  
-      if ic_fault = '1' then
+      if ic_fault.f = TRUE then
         v.f.pc     := hamming_encode(hamming_decode(r.f.pc));
+        v.f.valid  := (others => tmr_voter(r.f.valid(0), r.f.valid(1), r.f.valid(2)));
       else
         v.f := r.f;
       end if;
