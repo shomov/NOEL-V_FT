@@ -184,6 +184,9 @@ package nvsupport is
     );
 
   type prediction_array_type is array (0 to 3) of prediction_type;
+  type prediction_array_type_ecc is array (0 to 3) of prediction_type_ecc;
+  
+  function to_prediction_array_type(start : prediction_array_type_ecc) return prediction_array_type;
 
   -- Instruction Queue ------------------------------------------------------
   -- The instruction queue is a single-entry instruction buffer located in the
@@ -8037,7 +8040,7 @@ package body nvsupport is
     return res;
   end;
 
-
+-- TODO: remove tmr_voter()
   function to_prediction_type(ecc : prediction_type_ecc) return prediction_type is
     variable res     : prediction_type;
   begin
@@ -8051,6 +8054,15 @@ package body nvsupport is
   begin
     res.taken := (others => start.taken);
     res.hit   := (others => start.hit);
+    return res;
+  end;
+
+  function to_prediction_array_type(start : prediction_array_type_ecc) return prediction_array_type is
+    variable res     : prediction_array_type;
+  begin
+    for i in prediction_array_type_ecc'range loop
+      res(i) := to_prediction_type(start(i));
+    end loop;
     return res;
   end;
 

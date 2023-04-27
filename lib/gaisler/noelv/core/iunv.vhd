@@ -738,7 +738,7 @@ architecture rtl of iunv is
     exchyper    : std_ulogic_vector(2 downto 0);                                      -- Hypervisor exception in cache access
     tval2       : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);      -- Hypervisor exception info from cache
     tval2type   : ecc_vector(WORD2_ECC_RANGE.left downto WORD2_ECC_RANGE.right);      -- Hypervisor exception info from cache
-    prediction  : prediction_array_type;                                              -- BHT record
+    prediction  : prediction_array_type_ecc;                                          -- BHT record
     hit         : std_ulogic;                                                         -- fetched pc hit BTB
     unaligned   : std_ulogic;                                                         -- unaligned compressed instruction flag due to previous fetched pair
 --    uninst      : iword16_type;                                                     -- unaligned compressed instruction
@@ -1083,7 +1083,7 @@ architecture rtl of iunv is
     v.d.exchyper                := (others => '0');
     v.d.tval2                   := (others => '0');
     v.d.tval2type               := (others => '0');
-    v.d.prediction              := (others => prediction_none);
+    v.d.prediction              := (others => prediction_ecc_none);
     v.d.hit                     := '0';
     v.d.unaligned               := '0';
 --    v.d.uninst                  := ("00",(others => '0'), "000");
@@ -9913,7 +9913,7 @@ begin
     bjump_gen(active_extensions,
               de_inst,
               to_iqueue_type(r.d.buff),
-              r.d.prediction,
+              to_prediction_array_type(r.d.prediction),
               tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)),
               std_logic_vector(get_data(r.d.pc)),
               de_bjump_buff,
@@ -9990,60 +9990,60 @@ begin
 
     if de_rvc_buffer_first = '1' and single_issue = 0 then
       if de_rvc_aligned(0).lpc = "10" then
-        v.d.buff.prediction.hit   := (others => r.d.prediction(2).hit);
-        v.d.buff.prediction.taken := (others => r.d.prediction(2).taken);
+        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(2)).hit);
+        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(2)).taken);
       elsif de_rvc_aligned(0).lpc = "11" then
-        v.d.buff.prediction.hit   := (others => r.d.prediction(3).hit);
-        v.d.buff.prediction.taken := (others => r.d.prediction(3).taken);
+        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(3)).hit);
+        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(3)).taken);
       end if;
     end if;
 
     if de_rvc_buffer_sec = '1' and single_issue = 0 then
       if de_rvc_aligned(1).lpc = "01" then
-        v.d.buff.prediction.hit   := (others => r.d.prediction(1).hit);
-        v.d.buff.prediction.taken := (others => r.d.prediction(1).taken);
+        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(1)).hit);
+        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(1)).taken);
       elsif de_rvc_aligned(1).lpc = "10" then
-        v.d.buff.prediction.hit   := (others => r.d.prediction(2).hit);
-        v.d.buff.prediction.taken := (others => r.d.prediction(2).taken);
+        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(2)).hit);
+        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(2)).taken);
       elsif de_rvc_aligned(1).lpc = "11" then
-        v.d.buff.prediction.hit   := (others => r.d.prediction(3).hit);
-        v.d.buff.prediction.taken := (others => r.d.prediction(3).taken);
+        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(3)).hit);
+        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(3)).taken);
       end if;
     end if;
 
     if de_rvc_buffer_third = '1' and single_issue = 0 then
       if de_rvc_buffer_inst.lpc = "10" then
-        v.d.buff.prediction.hit   := (others => r.d.prediction(2).hit);
-        v.d.buff.prediction.taken := (others => r.d.prediction(2).taken);
+        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(2)).hit);
+        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(2)).taken);
       elsif de_rvc_buffer_inst.lpc = "11" then
-        v.d.buff.prediction.hit   := (others => r.d.prediction(3).hit);
-        v.d.buff.prediction.taken := (others => r.d.prediction(3).taken);
+        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(3)).hit);
+        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(3)).taken);
       end if;
     end if;
 
-    de_rvc_bhto_taken(0)   := r.d.prediction(0).taken;
-    de_rvc_btb_hit(0)      := r.d.prediction(0).hit;
+    de_rvc_bhto_taken(0)   := to_prediction_type(r.d.prediction(0)).taken;
+    de_rvc_btb_hit(0)      := to_prediction_type(r.d.prediction(0)).hit;
     if de_rvc_aligned(0).lpc = "01" or ( single_issue /= 0 and de_rvc_aligned(0).lpc = "11" )then
-      de_rvc_bhto_taken(0) := r.d.prediction(1).taken;
-      de_rvc_btb_hit(0)    := r.d.prediction(1).hit;
+      de_rvc_bhto_taken(0) := to_prediction_type(r.d.prediction(1)).taken;
+      de_rvc_btb_hit(0)    := to_prediction_type(r.d.prediction(1)).hit;
     elsif de_rvc_aligned(0).lpc = "10" and single_issue = 0 then
-      de_rvc_bhto_taken(0) := r.d.prediction(2).taken;
-      de_rvc_btb_hit(0)    := r.d.prediction(2).hit;
+      de_rvc_bhto_taken(0) := to_prediction_type(r.d.prediction(2)).taken;
+      de_rvc_btb_hit(0)    := to_prediction_type(r.d.prediction(2)).hit;
     elsif de_rvc_aligned(0).lpc = "11" and single_issue = 0 then
-      de_rvc_bhto_taken(0) := r.d.prediction(3).taken;
-      de_rvc_btb_hit(0)    := r.d.prediction(3).hit;
+      de_rvc_bhto_taken(0) := to_prediction_type(r.d.prediction(3)).taken;
+      de_rvc_btb_hit(0)    := to_prediction_type(r.d.prediction(3)).hit;
     end if;
-    de_rvc_bhto_taken(1)   := r.d.prediction(0).taken;
-    de_rvc_btb_hit(1)      := r.d.prediction(0).hit;
+    de_rvc_bhto_taken(1)   := to_prediction_type(r.d.prediction(0)).taken;
+    de_rvc_btb_hit(1)      := to_prediction_type(r.d.prediction(0)).hit;
     if de_rvc_aligned(1).lpc = "01" then
-      de_rvc_bhto_taken(1) := r.d.prediction(1).taken;
-      de_rvc_btb_hit(1)    := r.d.prediction(1).hit;
+      de_rvc_bhto_taken(1) := to_prediction_type(r.d.prediction(1)).taken;
+      de_rvc_btb_hit(1)    := to_prediction_type(r.d.prediction(1)).hit;
     elsif de_rvc_aligned(1).lpc = "10" then
-      de_rvc_bhto_taken(1) := r.d.prediction(2).taken;
-      de_rvc_btb_hit(1)    := r.d.prediction(2).hit;
+      de_rvc_bhto_taken(1) := to_prediction_type(r.d.prediction(2)).taken;
+      de_rvc_btb_hit(1)    := to_prediction_type(r.d.prediction(2)).hit;
     elsif de_rvc_aligned(1).lpc = "11" then
-      de_rvc_bhto_taken(1) := r.d.prediction(3).taken;
-      de_rvc_btb_hit(1)    := r.d.prediction(3).hit;
+      de_rvc_bhto_taken(1) := to_prediction_type(r.d.prediction(3)).taken;
+      de_rvc_btb_hit(1)    := to_prediction_type(r.d.prediction(3)).hit;
     end if;
 
     if v.d.unaligned = '1' then
@@ -10843,13 +10843,13 @@ begin
     --v.d.prediction(0).dir     := bhto.rdata(1 downto 0);
     --v.d.prediction(1).dir     := bhto.rdata(3 downto 2);
     for i in 0 to 3 loop
-      v.d.prediction(i).taken := bhto.taken(i);
+      v.d.prediction(i).taken := (others => bhto.taken(i));
     end loop;
 
     if r.csr.dfeaturesen.staticbp = '1' then
       for i in 0 to 3 loop
 --        v.d.prediction(i).dir   := (others => '0');
-        v.d.prediction(i).taken := r.csr.dfeaturesen.staticdir;
+        v.d.prediction(i).taken := (others => r.csr.dfeaturesen.staticdir);
       end loop;
     end if;
 
@@ -10858,30 +10858,30 @@ begin
     btb_hitv := btbo.hit;
     v.d.buff.prediction.hit := (others => '0');
     for i in 0 to 3 loop
-      v.d.prediction(i).hit := '0';
+      v.d.prediction(i).hit := (others => '0');
     end loop;
     if btb_hitv = '1' then
       if (btbo.lpc = "00" or (single_issue /= 0 and btbo.lpc = "10")) and
-         v.d.prediction(0).taken = '1' and de_btb_valid(0) = '1' then
-        v.d.prediction(0).hit := '1';
+          to_prediction_type(v.d.prediction(0)).taken = '1' and de_btb_valid(0) = '1' then
+        v.d.prediction(0).hit := (others => '1');
         de_hit                := '1';
         if v.d.unaligned = '1' then
           v.d.buff.prediction.hit   := (others => '1');
-          v.d.buff.prediction.taken := (others => v.d.prediction(0).taken);
-          v.d.prediction(0).hit     := '0';
+          v.d.buff.prediction.taken := v.d.prediction(0).taken;
+          v.d.prediction(0).hit     := (others => '0');
         end if;
       end if;
       if (btbo.lpc = "01" or (single_issue /= 0 and btbo.lpc = "11")) and
-         v.d.prediction(1).taken = '1' and de_btb_valid(1) = '1' then
-        v.d.prediction(1).hit := '1';
+          to_prediction_type(v.d.prediction(1)).taken = '1' and de_btb_valid(1) = '1' then
+        v.d.prediction(1).hit := (others => '1');
         de_hit                := '1';
       end if;
-      if btbo.lpc = "10" and v.d.prediction(2).taken = '1' and de_btb_valid(2) = '1' and single_issue = 0 then
-        v.d.prediction(2).hit := '1';
+      if btbo.lpc = "10" and to_prediction_type(v.d.prediction(2)).taken = '1' and de_btb_valid(2) = '1' and single_issue = 0 then
+        v.d.prediction(2).hit := (others => '1');
         de_hit                := '1';
       end if;
-      if btbo.lpc = "11" and v.d.prediction(3).taken = '1' and de_btb_valid(3) = '1' and single_issue = 0 then
-        v.d.prediction(3).hit := '1';
+      if btbo.lpc = "11" and to_prediction_type(v.d.prediction(3)).taken = '1' and de_btb_valid(3) = '1' and single_issue = 0 then
+        v.d.prediction(3).hit := (others => '1');
         de_hit                := '1';
       end if;
     end if;
