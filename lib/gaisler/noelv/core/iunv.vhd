@@ -739,8 +739,8 @@ architecture rtl of iunv is
     tval2       : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);      -- Hypervisor exception info from cache
     tval2type   : ecc_vector(WORD2_ECC_RANGE.left downto WORD2_ECC_RANGE.right);      -- Hypervisor exception info from cache
     prediction  : prediction_array_type_ecc;                                          -- BHT record
-    hit         : std_ulogic;                                                         -- fetched pc hit BTB
-    unaligned   : std_ulogic;                                                         -- unaligned compressed instruction flag due to previous fetched pair
+    hit         : std_ulogic;                                                         -- fetched pc hit BTB (don't used)
+    unaligned   : std_ulogic_vector(2 downto 0);                                      -- unaligned compressed instruction flag due to previous fetched pair
 --    uninst      : iword16_type;                                                     -- unaligned compressed instruction
   end record;
 
@@ -1085,7 +1085,7 @@ architecture rtl of iunv is
     v.d.tval2type               := (others => '0');
     v.d.prediction              := (others => prediction_ecc_none);
     v.d.hit                     := '0';
-    v.d.unaligned               := '0';
+    v.d.unaligned               := (others => '0');
 --    v.d.uninst                  := ("00",(others => '0'), "000");
     -- Register Access Stage
     v.a.ctrl                    := (others => pipeline_ctrl_none);
@@ -9941,7 +9941,7 @@ begin
           -- otherwise it might be lost if there is a valid instruction after that.
           de_rvc_buffer_sec   := '1';
           de_rvc_buffer_third := '0';
-          v.d.unaligned       := '0';
+          v.d.unaligned       := (others => '0');
         end if;
         if de_rvc_buffer_sec = '1' and de_rvc_aligned(1).lpc = "01" then
           v.d.buff.bjump_predicted := (others => '1');
@@ -9957,7 +9957,7 @@ begin
         if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and de_rvc_aligned(1).lpc = "10" then
           de_rvc_buffer_sec   := '1';
           de_rvc_buffer_third := '0';
-          v.d.unaligned       := '0';
+          v.d.unaligned       := (others => '0');
           -- Second instruction in rvc is jumping and there is a valid instruction in buffer.
           -- In this case assert buffer sec to latch bjump in the buffer,
           -- otherwise it might be lost if there is a valid instruction after that.
@@ -9984,7 +9984,7 @@ begin
     if (de_bjump = '1' or de_btb_taken = '1') and single_issue /= 0 then
        if de_bjump_pos(0) = '1' then
          de_rvc_buffer_third := '0';
-         v.d.unaligned       := '0';
+         v.d.unaligned       := (others => '0');
        end if;
     end if;
 
@@ -10046,13 +10046,13 @@ begin
       de_rvc_btb_hit(1)    := to_prediction_type(r.d.prediction(3)).hit;
     end if;
 
-    if v.d.unaligned = '1' then
+    if tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
       v.d.buff.bjump_predicted := (others => '0');
       v.d.buff.xc              := (others => '0');
     end if;
 
     de_buff_inst_xc   := "000";
-    if r.d.unaligned = '1' and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' then
+    if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' then
       de_buff_inst_xc := tmr_voter(r.d.exchyper(0), r.d.exchyper(1), r.d.exchyper(2)) & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
     end if;
 
@@ -10069,7 +10069,7 @@ begin
     de_inst_comp_ill := de_rvc_comp_ill;
     if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
       -- Only add one new instruction.
-      de_inst_xc_msb       := r.d.unaligned and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2));  -- Unaligned [31:16] exception
+      de_inst_xc_msb       := tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2));  -- Unaligned [31:16] exception
       de_inst_mexc(0)      := de_inst_xc_msb;
       de_inst_buff(1)      := de_mux_instruction(0);
       de_inst_buff(0)      := to_iword_type(r.d.buff.inst);
@@ -10173,7 +10173,7 @@ begin
               de_rvc_buffer_third,      -- in  : Buffer third inst
               de_rvc_buffer_sec,        -- in  : Buffer sec inst
               de_rvc_buffer_first,      -- in  : Buffer first
-              v.d.unaligned,            -- in  : Unaligned
+              tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)),            -- in  : Unaligned
               de_issue,                 -- in  : Instruction Issue Valid Signals
               de_hold_pc,               -- out : Hold PC
               -- v.d.buff.valid => (others => buff_valid)           -- out : Buffer valid
@@ -10291,7 +10291,7 @@ begin
     end if;
 
     if tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '0' or
-                           (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and r.d.unaligned = '1' 
+                           (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' 
                                 and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1')) then
       de_inst_valid(1) := '0';
     end if;
@@ -10576,7 +10576,7 @@ begin
           end if;
         end loop;
       end if;
-      if de_btb_taken_buff = '1' and r.d.unaligned = '1' then
+      if de_btb_taken_buff = '1' and tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' then
         v.d.buff.valid := (others => '0');
       end if;
     end if;
@@ -10683,11 +10683,11 @@ begin
     end if;
 
     -- Buffer the MSB of the unaligned instruction
-    if de_rvc_buffer_third = '1' and v.d.unaligned = '1' then
+    if de_rvc_buffer_third = '1' and tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
       v.d.buff.inst.d := hamming_encode(get_data(v.d.buff.inst.d(31 downto 16)) & get_data(v.d.inst(0))(15 downto 0));
     end if;
 
-    if ico.mds = '0' and r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+    if ico.mds = '0' and tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
       v.d.buff.inst.d := hamming_encode(get_data(v.d.buff.inst.d(31 downto 16)) & get_data(v.d.inst(0))(15 downto 0));
     end if;
 
@@ -10731,7 +10731,7 @@ begin
             v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
           end if;
 
-          if v.d.unaligned = '1' then
+          if tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
             if de_rvc_valid(0) = '1' and de_issue(1) = '0' then
               v.d.pc := r.d.pc;
             elsif de_rvc_valid(0)= '1' and de_issue(1) = '1' then
@@ -10752,7 +10752,7 @@ begin
       end if;
     end if;
 
-    if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and v.d.unaligned = '1' then
+    if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
       v.d.pc := hamming_encode(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 2) & "10");
     end if;
 
@@ -10865,7 +10865,7 @@ begin
           to_prediction_type(v.d.prediction(0)).taken = '1' and de_btb_valid(0) = '1' then
         v.d.prediction(0).hit := (others => '1');
         de_hit                := '1';
-        if v.d.unaligned = '1' then
+        if tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
           v.d.buff.prediction.hit   := (others => '1');
           v.d.buff.prediction.taken := v.d.prediction(0).taken;
           v.d.prediction(0).hit     := (others => '0');
@@ -11296,7 +11296,7 @@ begin
         v.d.exchyper    := (others => s_exchyper);
         v.d.tval2       := hamming_encode(std_ulogic_vector(s_tval2));
         v.d.tval2type   := hamming_encode(std_ulogic_vector(s_tval2type));
-        if r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+        if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
           -- v.d.buff.inst.d(31 downto 16) := std_logic_vector(get_data(v.d.inst(0))(15 downto 0));
           v.d.buff.inst.d := hamming_encode(get_data(v.d.inst(0))(15 downto 0) & get_data(v.d.buff.inst.d)(15 downto 0));
         end if;
@@ -11331,7 +11331,7 @@ begin
         v.d.exchyper    := (others => s_exchyper);
         v.d.tval2       := hamming_encode(std_ulogic_vector(s_tval2));
         v.d.tval2type   := hamming_encode(std_ulogic_vector(s_tval2type));
-        if r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+        if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
           -- v.d.buff.inst.d(31 downto 16) := v.d.inst(0)(15 downto 0);
           v.d.buff.inst.d := hamming_encode(get_data(v.d.inst(0))(15 downto 0) & get_data(v.d.buff.inst.d)(15 downto 0));
         end if;
@@ -11748,7 +11748,7 @@ begin
           -- I Cache Miss
           if ico.mds = '0' then
             r.d.inst       <= rin.d.inst;
-            if r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+            if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
               -- r.d.buff.inst.d(31 downto 16) <= rin.d.buff.inst.d(31 downto 16);
               r.d.buff.inst.d <= hamming_encode(get_data(rin.d.buff.inst.d)(31 downto 16) & get_data(r.d.buff.inst.d)(15 downto 0));
             end if;
@@ -11864,7 +11864,7 @@ begin
               r.d.tval2     <= rin.d.tval2;
               r.d.tval2type <= rin.d.tval2type;
               r.d.way       <= rin.d.way;
-              if r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2))  = '1' then
+              if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2))  = '1' then
                 r.d.buff.inst.d(31 downto 16) <= rin.d.buff.inst.d(31 downto 16);
               end if;
             end if;
@@ -11928,7 +11928,7 @@ begin
               r.d.tval2     <= rin.d.tval2;
               r.d.tval2type <= rin.d.tval2type;
               r.d.way       <= rin.d.way;
-              if r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+              if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
                 r.d.buff.inst.d(31 downto 16) <= rin.d.buff.inst.d(31 downto 16);
               end if;
             end if;

@@ -707,7 +707,7 @@ package nvsupport is
                         buffer_third_out : out std_logic;  -- buffer the third instruction
                         buffer_inst      : out iword_type;
                         buff_comp_ill    : out std_logic;
-                        unaligned_out    : out std_ulogic);
+                        unaligned_out    : out std_ulogic_vector(2 downto 0));
 
   procedure rvc_expander(active   : in  extension_type;
                          inst_in  : in  word16;
@@ -2775,7 +2775,7 @@ package body nvsupport is
                         buffer_third_out : out std_logic;  -- buffer the third instruction
                         buffer_inst      : out iword_type;
                         buff_comp_ill    : out std_logic;
-                        unaligned_out    : out std_ulogic) is
+                        unaligned_out    : out std_ulogic_vector(2 downto 0)) is
     variable single_issue : integer    := is_enabled(active, x_single_issue);
     -- Non-constant
     variable inst         : iword_pair_type;
@@ -3115,7 +3115,7 @@ package body nvsupport is
 
     -- Output Signals
     inst_out         := inst;
-    unaligned_out    := unaligned and valid_in;
+    unaligned_out    := (others => (unaligned and valid_in));
     valid_out        := valid;
     hold_out         := hold and valid_in;
     npc_out          := npc;
