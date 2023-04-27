@@ -700,33 +700,36 @@ architecture rtl of iunv is
   );
 
   type pipeline_ctrl_lanes_type is array (lanes'range) of pipeline_ctrl_type;
-  constant WORD_ECC : ecc_range := hamming_indices(pctype'length);
+
+  -- ECC constants -----------------------------------------------------------
+  constant PCTYPE_ECC_RANGE : ecc_range := hamming_indices(pctype'length);
+
   -- PC Gen <-> Fetch Stage --------------------------------------------------
   type fetch_reg_type is record                       
-    pc : ecc_vector(WORD_ECC.left downto WORD_ECC.right);                -- pc to be fetched
-    valid       : std_ulogic_vector(2 downto 0);                         -- valid fetch request
+    pc : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);         -- pc to be fetched
+    valid       : std_ulogic_vector(2 downto 0);                                  -- valid fetch request
   end record;
 
   -- Fetch Stage <-> Decode Stage --------------------------------------------
   type decode_reg_type is record
-    pc          : pctype;                             -- fetched program counter as from fetch stage
-    inst        : icdtype;                            -- instructions
-    buff        : iqueue_type;                        -- single-entry instruction buffer
-    valid       : std_ulogic;                         -- instructions are valid
-    xc          : std_ulogic;                         -- exception/trap from previous stages
-    cause       : cause_type;                         -- exception/trap cause from previous stages
-    tval        : wordx;                              -- exception/trap value from previous stages
-    way         : std_logic_vector(IWAYMSB downto 0); -- cache way where instructions are located
-    mexc        : std_ulogic;                         -- error in cache access
-    was_xc      : std_ulogic;                         -- error just before
-    exctype     : std_ulogic;                         -- error type in cache access
-    exchyper    : std_ulogic;                         -- Hypervisor exception in cache access
-    tval2       : wordx;                              -- Hypervisor exception info from cache
-    tval2type   : word2;                              -- Hypervisor exception info from cache
-    prediction  : prediction_array_type;              -- BHT record
-    hit         : std_ulogic;                         -- fetched pc hit BTB
-    unaligned   : std_ulogic;                         -- unaligned compressed instruction flag due to previous fetched pair
---    uninst      : iword16_type;                       -- unaligned compressed instruction
+    pc : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);   -- fetched program counter as from fetch stage
+    inst        : icdtype;                                                  -- instructions
+    buff        : iqueue_type;                                              -- single-entry instruction buffer
+    valid       : std_ulogic;                                               -- instructions are valid
+    xc          : std_ulogic;                                               -- exception/trap from previous stages
+    cause       : cause_type;                                               -- exception/trap cause from previous stages
+    tval        : wordx;                                                    -- exception/trap value from previous stages
+    way         : std_logic_vector(IWAYMSB downto 0);                       -- cache way where instructions are located
+    mexc        : std_ulogic;                                               -- error in cache access
+    was_xc      : std_ulogic;                                               -- error just before
+    exctype     : std_ulogic;                                               -- error type in cache access
+    exchyper    : std_ulogic;                                               -- Hypervisor exception in cache access
+    tval2       : wordx;                                                    -- Hypervisor exception info from cache
+    tval2type   : word2;                                                    -- Hypervisor exception info from cache
+    prediction  : prediction_array_type;                                    -- BHT record
+    hit         : std_ulogic;                                               -- fetched pc hit BTB
+    unaligned   : std_ulogic;                                               -- unaligned compressed instruction flag due to previous fetched pair
+--    uninst      : iword16_type;                                           -- unaligned compressed instruction
   end record;
 
   -- Decode Stage <-> Register Access Stage -----------------------------------
@@ -1054,7 +1057,7 @@ architecture rtl of iunv is
     v.f.pc                      := hamming_encode(std_ulogic_vector(PC_RESET));
     v.f.valid                   := (others => '0');
     -- Decode Stage
-    v.d.pc                      := PC_RESET;
+    v.d.pc                      := hamming_encode(std_ulogic_vector(PC_RESET));
     v.d.inst                    := (others => (others => '0'));
     v.d.buff                    := iqueue_none;
     v.d.valid                   := '0';
@@ -9837,7 +9840,7 @@ begin
     -- RVC Aligner --------------------------------------------------------
     rvc_aligner(active_extensions,
                 de_inst,                      -- in  : Fetch Instructions
-                r.d.pc,                       -- in  : Decode PC
+                std_logic_vector(get_data(r.d.pc)),                       -- in  : Decode PC
                 r.d.valid,                    -- in  : Valid Instructions
                 not (r.csr.mstatus.fs = "00" or
                 (r.csr.v = '1' and r.csr.vsstatus.fs = "00")),
@@ -9863,8 +9866,8 @@ begin
       de_rvc_buffer_comp_ill := '0';
     end if;
 
-    de_ipc(0) := r.d.pc(r.d.pc'high downto 3) & de_rvc_aligned(0).lpc & '0';
-    de_ipc(1) := r.d.pc(r.d.pc'high downto 3) & de_rvc_aligned(1).lpc & '0';
+    de_ipc(0) := std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(0).lpc & '0';
+    de_ipc(1) := std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0';
 
     de_rvc_aligned(0).xc   := "000";
     de_rvc_aligned(1).xc   := "000";
@@ -9890,7 +9893,7 @@ begin
     -- Save second instruction in case it is not issued.
     v.d.buff.inst       := de_mux_instruction(1);
     v.d.buff.cinst      := de_mux_cinstruction(1);
-    v.d.buff.pc         := to0x(r.d.pc(r.d.pc'high downto 3) & de_rvc_aligned(1).lpc & '0');
+    v.d.buff.pc         := to0x(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0');
     v.d.buff.comp       := de_rvc_comp(1);
     v.d.buff.xc         := de_rvc_illegal(1);
     v.d.buff.comp_ill   := de_rvc_comp_ill(1);
@@ -9900,7 +9903,7 @@ begin
               r.d.buff,
               r.d.prediction,
               r.d.valid,
-              r.d.pc,
+              std_logic_vector(get_data(r.d.pc)),
               de_bjump_buff,
               de_bjump,
               de_btb_taken,
@@ -10098,7 +10101,7 @@ begin
       v.d.buff.inst.d   := de_rvc_buffer_inst_exp;
       v.d.buff.cinst    := de_rvc_buffer_inst.dc;
       v.d.buff.comp     := de_rvc_buffer_comp;
-      v.d.buff.pc       := to0x(r.d.pc(r.d.pc'high downto 3) & de_rvc_buffer_inst.lpc & '0');
+      v.d.buff.pc       := to0x(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_buffer_inst.lpc & '0');
       v.d.buff.comp_ill := de_rvc_buffer_comp_ill;
     -- bufferin of [31:16] is done after the v.d.inst assigment
     end if;
@@ -10255,9 +10258,9 @@ begin
       if de_inst_xc_msb = '1' then
         -- While fetching the second part of an unaligned instruction,
         -- the PC would be first 16 bytes for r.d.pc.
-        de_to_ra_tval(0)   := pc2xlen(r.d.pc(r.d.pc'high downto 3) & "000");
+        de_to_ra_tval(0)   := pc2xlen(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & "000");
         if single_issue /= 0 then
-          de_to_ra_tval(0) := pc2xlen(r.d.pc(r.d.pc'high downto 2) & "00");
+          de_to_ra_tval(0) := pc2xlen(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 2)) & "00");
         end if;
       end if;
     elsif de_inst_buff(1).xc(0) = '1' then
@@ -10627,7 +10630,7 @@ begin
             end if;
             if ico.mds = '0' then
               v.d.inst(0)(31 downto 0) := ico.data(i)(31 downto 0);
-              if r.d.pc(2) = '1' then
+              if get_data(r.d.pc)(2) = '1' then
                 v.d.inst(0)(31 downto 0) := ico.data(i)(63 downto 32);
               end if;
             end if;
@@ -10668,24 +10671,25 @@ begin
     end if;
 
 
-    v.d.pc := pctype(get_data(r.f.pc));--TODO ?
+    v.d.pc := r.f.pc;
 
     if de_rvc_hold = '1' then
-      v.d.pc := r.d.pc(r.d.pc'high downto 3) & de_rvc_npc;
+      -- v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & std_logic_vector(de_rvc_npc)));
+      v.d.pc := hamming_encode(std_ulogic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3) & std_ulogic_vector(de_rvc_npc)));
       if single_issue = 0 then
         if de_rvc_valid(1) = '1' and de_issue(1) = '0' then
-          v.d.pc := r.d.pc(r.d.pc'high downto 3) & de_rvc_aligned(1).lpc & '0';
+          v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
         end if;
         if r.d.buff.valid = '1' then
           if de_rvc_valid(0) = '1' and de_issue(1) = '0' then
             v.d.pc := r.d.pc;
           elsif de_rvc_valid(0) = '1' and de_issue(1) = '1' then
-            v.d.pc := r.d.pc(r.d.pc'high downto 3) & de_rvc_aligned(1).lpc & '0';
+            v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
           end if;
         end if;
       end if;
       if single_issue /= 0 then
-        v.d.pc := r.d.pc(r.d.pc'high downto 2) & "10";
+        v.d.pc := hamming_encode(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 2) & "10");
       end if;
     end if;
 
@@ -10693,7 +10697,7 @@ begin
       if r.d.buff.valid = '0' and single_issue = 0 then
         if de_rvc_buffer_third = '1' then
           if de_rvc_valid(1) = '1' and de_issue(1) = '0' then
-            v.d.pc := r.d.pc(r.d.pc'high downto 3) & de_rvc_aligned(1).lpc & '0';
+            v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
           end if;
         end if;
       end if;
@@ -10703,7 +10707,7 @@ begin
           if de_issue(1) = '0' then
             v.d.pc := r.d.pc;
           else
-            v.d.pc := r.d.pc(r.d.pc'high downto 3) & de_rvc_aligned(1).lpc & '0';
+            v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
           end if;
 
           if v.d.unaligned = '1' then
@@ -10711,7 +10715,7 @@ begin
               v.d.pc := r.d.pc;
             elsif de_rvc_valid(0)= '1' and de_issue(1) = '1' then
               -- If it is holding that means there is a valid instruction in lane 1
-              v.d.pc := r.d.pc(r.d.pc'high downto 3) & de_rvc_aligned(1).lpc & '0';
+              v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
             end if;
           end if;
         end if;
@@ -10728,7 +10732,7 @@ begin
     end if;
 
     if v.d.buff.valid = '1' and v.d.unaligned = '1' then
-      v.d.pc := std_logic_vector(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 2) & "10");
+      v.d.pc := hamming_encode(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 2) & "10");
     end if;
 
     if r.f.valid(0) = '1' then
@@ -11044,7 +11048,7 @@ begin
     ici.dpc                        <= (others => '0');
     ici.fpc                        <= (others => '0');
     ici.rpc                        <= (others => '0');
-    ici.dpc(r.d.pc'high downto 3)  <= r.d.pc(r.d.pc'high downto 3);
+    ici.dpc(hamming_data_size(r.d.pc'length)-1 downto 3)  <= std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3));
     ici.fpc(hamming_data_size(r.f.pc'length)-1 downto 3)  <= std_logic_vector(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 3));
     ici.rpc(next_pc'high downto 3) <= next_pc(next_pc'high downto 3);
     ici.nostream                   <= reread_pc or r.csr.dfeaturesen.nostream;
@@ -11749,11 +11753,10 @@ begin
             -- MISA needs to be reset explicitly!
             r.csr.misa         <= create_misa;
             if DYNRST then
-              -- r.f.pc(r.f.pc'high downto 12) <= RST_VEC(RST_VEC'high downto 12);
+              -- r.f.pc(r.f.pc'high downto 12) <= RST_VEC(RST_VEC'high downto 12); -- to remove
               
               r.f.pc <= hamming_encode(std_ulogic_vector(RST_VEC(RST_VEC'high downto 12)) & get_data(r.f.pc)(12 downto 0));
-              
-              r.d.pc(r.d.pc'high downto 12) <= RST_VEC(RST_VEC'high downto 12);
+              r.d.pc <= hamming_encode(std_ulogic_vector(RST_VEC(RST_VEC'high downto 12)) & get_data(r.d.pc)(12 downto 0));
             end if;
           else
             -- Upon reset, MISA is reset, a hart’s privilege mode is set to M. The mstatus fields
@@ -11860,7 +11863,7 @@ begin
             r.d.pc <= rin.d.pc;
           end if;
           if rstn = '0' then
-            r.d.pc <= RST_VEC(RST_VEC'high downto 12) & PC_ZERO(11 downto 0);
+            r.d.pc <= hamming_encode(std_ulogic_vector(RST_VEC(RST_VEC'high downto 12)) & std_ulogic_vector(PC_ZERO(11 downto 0)));
           end if;
         end if;
       end process;
