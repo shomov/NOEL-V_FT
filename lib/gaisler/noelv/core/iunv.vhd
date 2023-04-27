@@ -730,8 +730,7 @@ architecture rtl of iunv is
     tval        : wordx;                                                              -- exception/trap value from previous stages
 
     way         : way_arr;                                                            -- cache way where instructions are located
-    
-    mexc        : std_ulogic;                                                         -- error in cache access
+    mexc        : std_ulogic_vector(2 downto 0);                                                         -- error in cache access
     was_xc      : std_ulogic;                                                         -- error just before
     exctype     : std_ulogic;                                                         -- error type in cache access
     exchyper    : std_ulogic;                                                         -- Hypervisor exception in cache access
@@ -1076,7 +1075,7 @@ architecture rtl of iunv is
     v.d.cause                   := RST_HARD_ALL;
     v.d.tval                    := zerox;
     v.d.way                     := (others => (others => '0'));
-    v.d.mexc                    := '0';
+    v.d.mexc                    := (others => '0');
     v.d.was_xc                  := '0';
     v.d.exctype                 := '0';
     v.d.exchyper                := '0';
@@ -9882,7 +9881,7 @@ begin
 
     de_rvc_aligned(0).xc   := "000";
     de_rvc_aligned(1).xc   := "000";
-    if r.d.mexc = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1' then
+    if tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1' then
       de_rvc_aligned(0).xc := r.d.exchyper & r.d.exctype & '1';
       de_rvc_aligned(1).xc := r.d.exchyper & r.d.exctype & '1';
     -- In case it is lsb of an unaligned instruction,
@@ -10051,7 +10050,7 @@ begin
     end if;
 
     de_buff_inst_xc   := "000";
-    if r.d.unaligned = '1' and r.d.mexc = '1' then
+    if r.d.unaligned = '1' and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' then
       de_buff_inst_xc := r.d.exchyper & r.d.exctype & '1';
     end if;
 
@@ -10064,11 +10063,11 @@ begin
     de_comp          := de_rvc_comp;
     de_rvc_xc        := de_rvc_illegal;
     de_inst_no_buf   := "00";
-    de_inst_mexc     := r.d.mexc & r.d.mexc;
+    de_inst_mexc     := tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) & tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2));
     de_inst_comp_ill := de_rvc_comp_ill;
     if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
       -- Only add one new instruction.
-      de_inst_xc_msb       := r.d.unaligned and r.d.mexc;  -- Unaligned [31:16] exception
+      de_inst_xc_msb       := r.d.unaligned and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2));  -- Unaligned [31:16] exception
       de_inst_mexc(0)      := de_inst_xc_msb;
       de_inst_buff(1)      := de_mux_instruction(0);
       de_inst_buff(0)      := to_iword_type(r.d.buff.inst);
@@ -10142,7 +10141,7 @@ begin
                        r.csr.dfeaturesen.dual_dis,
                        r.csr.dcsr.step,   -- in  : DCSR step
                        r.a.lalu_pre,      -- in  : Late ALUs from RA
-                       r.d.mexc,          -- in  : Fetch exception
+                       tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)),          -- in  : Fetch exception
                        rd(v, e, 0),       -- in  : rd register from RA
                        v.e.ctrl(0).rdv,   -- in  : Valid rd register from RA
                        rd(v, e, 1),       -- in  : rd register from RA
@@ -10179,7 +10178,7 @@ begin
               v.d.buff.valid           -- out : Buffer valid
               );
 
-    if r.d.mexc = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1' then
+    if tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1' then
       v.d.buff.valid := (others => '0');
     end if;
 
@@ -10289,14 +10288,15 @@ begin
       de_to_ra_tval(1)     := pc2xlen(de_pc(1));
     end if;
 
-    if r.d.mexc = '1' and (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '0' or
-                           (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and r.d.unaligned = '1' and r.d.mexc = '1')) then
+    if tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '0' or
+                           (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and r.d.unaligned = '1' 
+                                and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1')) then
       de_inst_valid(1) := '0';
     end if;
 
     -- inull icache after encountering an instruction memory exception
     mexc_inull   := '0';
-    if (r.d.mexc = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1') then
+    if (tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1') then
       mexc_inull := '1';
     end if;
 
@@ -10655,7 +10655,7 @@ begin
         end if;
       end loop;
       v.d.way         := (others => ico.way(IWAYMSB downto 0));   -- hit way
-      v.d.mexc        := ico.mexc;                    -- access exception
+      v.d.mexc        := (others => ico.mexc);                    -- access exception
       v.d.exctype     := ico.exctype;
       v.d.exchyper    := ico.exchyper;
       v.d.tval2       := ico.addrhyper(XLEN-1 downto 0);
@@ -10672,7 +10672,7 @@ begin
           end if;
         end if;
         v.d.way       := (others => (others => '0'));
-        v.d.mexc      := '0';
+        v.d.mexc      := (others => '0');
         v.d.exctype   := '0';
         v.d.exchyper  := '0';
         v.d.tval2     := zerox;
@@ -11257,7 +11257,7 @@ begin
 
     s_inst      := v.d.inst;
     s_way       := std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.d.way(0)), std_ulogic_vector(v.d.way(1)), std_ulogic_vector(v.d.way(2))));
-    s_mexc      := v.d.mexc;
+    s_mexc      := tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2));
     s_exctype   := v.d.exctype;
     s_exchyper  := v.d.exchyper;
     s_tval2     := v.d.tval2;
@@ -11289,7 +11289,7 @@ begin
       if holdn = '0' and ico.mds = '0' then
         v.d.inst        := s_inst;
         v.d.way         := (others => s_way);
-        v.d.mexc        := s_mexc;
+        v.d.mexc        := (others => s_mexc);
         v.d.exctype     := s_exctype;
         v.d.exchyper    := s_exchyper;
         v.d.tval2       := s_tval2;
@@ -11324,7 +11324,7 @@ begin
       if holdn = '0' and ico.mds = '0' then
         v.d.inst        := s_inst;
         v.d.way         := (others => s_way);
-        v.d.mexc        := s_mexc;
+        v.d.mexc        := (others => s_mexc);
         v.d.exctype     := s_exctype;
         v.d.exchyper    := s_exchyper;
         v.d.tval2       := s_tval2;
