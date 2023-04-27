@@ -106,7 +106,7 @@ use gaisler.noelvint.PMPPRECALCRES;
 use gaisler.noelvint.fpu_id;
 use gaisler.noelvint.reg_t;
 library shomov;
-use shomov.nmr_common.tmr_voter;
+use shomov.nmr_common.all;
 library extras;
 use extras.hamming_edac.all;
 
@@ -715,16 +715,22 @@ architecture rtl of iunv is
     valid       : std_ulogic_vector(2 downto 0);                                  -- valid fetch request
   end record;
 
+  type way_arr           is array (0 to 2) of std_logic_vector(IWAYMSB downto 0);
+
   -- Fetch Stage <-> Decode Stage --------------------------------------------
   type decode_reg_type is record
     pc          : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);    -- fetched program counter as from fetch stage
     inst        : icdtype_ecc;                                                        -- instructions
     buff        : iqueue_type_ecc;                                                    -- single-entry instruction buffer
     valid       : std_ulogic_vector(2 downto 0);                                      -- instructions are valid
+
+    -- don't used
     xc          : std_ulogic;                                                         -- exception/trap from previous stages
     cause       : cause_type;                                                         -- exception/trap cause from previous stages
     tval        : wordx;                                                              -- exception/trap value from previous stages
-    way         : std_logic_vector(IWAYMSB downto 0);                                 -- cache way where instructions are located
+
+    way         : way_arr;                                                            -- cache way where instructions are located
+    
     mexc        : std_ulogic;                                                         -- error in cache access
     was_xc      : std_ulogic;                                                         -- error just before
     exctype     : std_ulogic;                                                         -- error type in cache access
@@ -1069,7 +1075,7 @@ architecture rtl of iunv is
     v.d.xc                      := '0';
     v.d.cause                   := RST_HARD_ALL;
     v.d.tval                    := zerox;
-    v.d.way                     := (others => '0');
+    v.d.way                     := (others => (others => '0'));
     v.d.mexc                    := '0';
     v.d.was_xc                  := '0';
     v.d.exctype                 := '0';
@@ -10648,7 +10654,7 @@ begin
           end if;
         end if;
       end loop;
-      v.d.way         := ico.way(IWAYMSB downto 0);   -- hit way
+      v.d.way         := (others => ico.way(IWAYMSB downto 0));   -- hit way
       v.d.mexc        := ico.mexc;                    -- access exception
       v.d.exctype     := ico.exctype;
       v.d.exchyper    := ico.exchyper;
@@ -10665,7 +10671,7 @@ begin
             v.d.inst(0)   := hamming_encode(get_data(v.d.inst(0))(hamming_data_size(v.d.inst(0)'length)-1 downto 32) & std_ulogic_vector(dbgi.pbdata(63 downto 32)));
           end if;
         end if;
-        v.d.way       := (others => '0');
+        v.d.way       := (others => (others => '0'));
         v.d.mexc      := '0';
         v.d.exctype   := '0';
         v.d.exchyper  := '0';
@@ -11250,7 +11256,7 @@ begin
     -----------------------------------------------------------------------
 
     s_inst      := v.d.inst;
-    s_way       := v.d.way;
+    s_way       := std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.d.way(0)), std_ulogic_vector(v.d.way(1)), std_ulogic_vector(v.d.way(2))));
     s_mexc      := v.d.mexc;
     s_exctype   := v.d.exctype;
     s_exchyper  := v.d.exchyper;
@@ -11282,7 +11288,7 @@ begin
       -- We still need to keep strobed instruction data!
       if holdn = '0' and ico.mds = '0' then
         v.d.inst        := s_inst;
-        v.d.way         := s_way;
+        v.d.way         := (others => s_way);
         v.d.mexc        := s_mexc;
         v.d.exctype     := s_exctype;
         v.d.exchyper    := s_exchyper;
@@ -11317,7 +11323,7 @@ begin
       -- We still need to keep strobed instruction data!
       if holdn = '0' and ico.mds = '0' then
         v.d.inst        := s_inst;
-        v.d.way         := s_way;
+        v.d.way         := (others => s_way);
         v.d.mexc        := s_mexc;
         v.d.exctype     := s_exctype;
         v.d.exchyper    := s_exchyper;
