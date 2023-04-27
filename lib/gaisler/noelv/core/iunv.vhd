@@ -720,7 +720,7 @@ architecture rtl of iunv is
     pc          : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);    -- fetched program counter as from fetch stage
     inst        : icdtype_ecc;                                                        -- instructions
     buff        : iqueue_type_ecc;                                                    -- single-entry instruction buffer
-    valid       : std_ulogic;                                                         -- instructions are valid
+    valid       : std_ulogic_vector(2 downto 0);                                      -- instructions are valid
     xc          : std_ulogic;                                                         -- exception/trap from previous stages
     cause       : cause_type;                                                         -- exception/trap cause from previous stages
     tval        : wordx;                                                              -- exception/trap value from previous stages
@@ -1065,7 +1065,7 @@ architecture rtl of iunv is
     v.d.pc                      := hamming_encode(std_ulogic_vector(PC_RESET));
     v.d.inst                    := (others => (others => '0'));
     v.d.buff                    := iqueue_ecc_none;
-    v.d.valid                   := '0';
+    v.d.valid                   := (others => '0');
     v.d.xc                      := '0';
     v.d.cause                   := RST_HARD_ALL;
     v.d.tval                    := zerox;
@@ -9846,7 +9846,7 @@ begin
     rvc_aligner(active_extensions,
                 de_inst,                      -- in  : Fetch Instructions
                 std_logic_vector(get_data(r.d.pc)),                       -- in  : Decode PC
-                r.d.valid,                    -- in  : Valid Instructions
+                tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)),                    -- in  : Valid Instructions
                 not (r.csr.mstatus.fs = "00" or
                 (r.csr.v = '1' and r.csr.vsstatus.fs = "00")),
                 de_rvc_aligned,               -- out : Aligned Instructions
@@ -9876,7 +9876,7 @@ begin
 
     de_rvc_aligned(0).xc   := "000";
     de_rvc_aligned(1).xc   := "000";
-    if r.d.mexc = '1' and r.d.valid = '1' then
+    if r.d.mexc = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1' then
       de_rvc_aligned(0).xc := r.d.exchyper & r.d.exctype & '1';
       de_rvc_aligned(1).xc := r.d.exchyper & r.d.exctype & '1';
     -- In case it is lsb of an unaligned instruction,
@@ -9907,7 +9907,7 @@ begin
               de_inst,
               to_iqueue_type(r.d.buff),
               r.d.prediction,
-              r.d.valid,
+              tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)),
               std_logic_vector(get_data(r.d.pc)),
               de_bjump_buff,
               de_bjump,
@@ -10173,7 +10173,7 @@ begin
               v.d.buff.valid           -- out : Buffer valid
               );
 
-    if r.d.mexc = '1' and r.d.valid = '1' then
+    if r.d.mexc = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1' then
       v.d.buff.valid := (others => '0');
     end if;
 
@@ -10290,7 +10290,7 @@ begin
 
     -- inull icache after encountering an instruction memory exception
     mexc_inull   := '0';
-    if (r.d.mexc = '1' and r.d.valid = '1') then
+    if (r.d.mexc = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1') then
       mexc_inull := '1';
     end if;
 
@@ -10749,7 +10749,7 @@ begin
     end if;
 
     if r.f.valid(0) = '1' then
-      v.d.valid := '1';
+      v.d.valid := (others => '1');
     end if;
 
     if de_nullify = '1' then
@@ -10757,7 +10757,7 @@ begin
         v.a.ctrl(i).valid := '0';
       end loop;
       v.d.buff.valid      := (others => '0');
-      v.d.valid           := '0';
+      v.d.valid           := (others => '0');
     end if;
 
     if de_bjump = '1' then
@@ -10767,22 +10767,22 @@ begin
           for j in lanes'range loop
             if v.a.ctrl(j).valid = '1' and v.a.ctrl(j).pc(2 downto 1) = u2vec(i, 2)
             and v_a_inst_no_buf(j) = '0' and single_issue = 0 then
-              v.d.valid := '0';
+              v.d.valid := (others => '0');
             end if;
             if single_issue /= 0 then
               if v.a.ctrl(j).valid = '1' and v.a.ctrl(j).pc(1 downto 1) = u2vec(i, 1) and v_a_inst_no_buf(j) = '0' then
-                v.d.valid := '0';
+                v.d.valid := (others => '0');
               end if;
             end if;
           end loop;
           if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and 
               std_logic_vector(get_data(v.d.buff.pc)(2 downto 1)) = u2vec(i, 2) and single_issue = 0 then
-            v.d.valid := '0';
+            v.d.valid := (others => '0');
           end if;
         end if;
       end loop;
       if de_bjump_buff = '1' then
-        v.d.valid := '0';
+        v.d.valid := (others => '0');
         v.d.buff.valid := (others => '0');
       end if;
       if de_bjump_buff = '0' then
@@ -11789,7 +11789,7 @@ begin
             r.csr.misa         <= create_misa;
             r.f.pc             <= hamming_encode(std_ulogic_vector(PC_RESET));
             r.f.valid          <= (others => '0');
-            r.d.valid          <= '0';
+            r.d.valid          <= (others => '0');
             if need_extra_sync_reset(fabtech) /= 0 then
               r.d.inst         <= (others => (others => '0'));
               r.x.mexc         <= '0';
