@@ -705,6 +705,7 @@ architecture rtl of iunv is
   constant PCTYPE_ECC_RANGE   : ecc_range := hamming_indices(pctype'length);
   constant ICDTYPE_ECC_RANGE  : ecc_range := hamming_indices(icdtype'length);
   constant WORD64_ECC_RANGE  : ecc_range := hamming_indices(word64'length);
+  constant WORDX_ECC_RANGE  : ecc_range := hamming_indices(wordx'length);
 
 
   type icdtype_ecc       is array (0 to iways - 1) of ecc_vector(WORD64_ECC_RANGE.left downto WORD64_ECC_RANGE.right);
@@ -734,7 +735,7 @@ architecture rtl of iunv is
     was_xc      : std_ulogic_vector(2 downto 0);                                      -- error just before
     exctype     : std_ulogic_vector(2 downto 0);                                      -- error type in cache access
     exchyper    : std_ulogic_vector(2 downto 0);                                      -- Hypervisor exception in cache access
-    tval2       : wordx;                                                              -- Hypervisor exception info from cache
+    tval2       : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);      -- Hypervisor exception info from cache
     tval2type   : word2;                                                              -- Hypervisor exception info from cache
     prediction  : prediction_array_type;                                              -- BHT record
     hit         : std_ulogic;                                                         -- fetched pc hit BTB
@@ -1079,7 +1080,7 @@ architecture rtl of iunv is
     v.d.was_xc                  := (others => '0');
     v.d.exctype                 := (others => '0');
     v.d.exchyper                := (others => '0');
-    v.d.tval2                   := zerox;
+    v.d.tval2                   := (others => '0');
     v.d.tval2type               := "00";
     v.d.prediction              := (others => prediction_none);
     v.d.hit                     := '0';
@@ -4557,7 +4558,7 @@ architecture rtl of iunv is
         gva   := csr.v;
       elsif cause = XC_INST_INST_G_PAGE_FAULT then
         gva   := csr.v;
-        tval2 := r.d.tval2;
+        tval2 := wordx(get_data(r.d.tval2));
         if r.d.tval2type = "01" then
           -- The value from MMU/cache controller has no knowledge of
           -- exactly what part of the word the faulting instruction
@@ -10658,7 +10659,7 @@ begin
       v.d.mexc        := (others => ico.mexc);                    -- access exception
       v.d.exctype     := (others => ico.exctype);
       v.d.exchyper    := (others => ico.exchyper);
-      v.d.tval2       := ico.addrhyper(XLEN-1 downto 0);
+      v.d.tval2       := hamming_encode(std_ulogic_vector(ico.addrhyper(XLEN-1 downto 0)));
       v.d.tval2type   := ico.typehyper;
       -- Progam buffer
       if f_pb_exec = '1' then
@@ -10675,7 +10676,7 @@ begin
         v.d.mexc      := (others => '0');
         v.d.exctype   := (others => '0');
         v.d.exchyper  := (others => '0');
-        v.d.tval2     := zerox;
+        v.d.tval2     := (others => '0');
         v.d.tval2type := "00";
       end if;
     end if;
@@ -11260,7 +11261,7 @@ begin
     s_mexc      := tmr_voter(v.d.mexc(0), v.d.mexc(1), v.d.mexc(2));
     s_exctype   := tmr_voter(v.d.exctype(0), v.d.exctype(1), v.d.exctype(2));
     s_exchyper  := tmr_voter(v.d.exchyper(0), v.d.exchyper(1), v.d.exchyper(2));
-    s_tval2     := v.d.tval2;
+    s_tval2     := wordx(get_data(v.d.tval2));
     s_tval2type := v.d.tval2type;
     s_fpu_wait  := v.e.fpu_wait;
 
@@ -11292,7 +11293,7 @@ begin
         v.d.mexc        := (others => s_mexc);
         v.d.exctype     := (others => s_exctype);
         v.d.exchyper    := (others => s_exchyper);
-        v.d.tval2       := s_tval2;
+        v.d.tval2       := hamming_encode(std_ulogic_vector(s_tval2));
         v.d.tval2type   := s_tval2type;
         if r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
           -- v.d.buff.inst.d(31 downto 16) := std_logic_vector(get_data(v.d.inst(0))(15 downto 0));
@@ -11327,7 +11328,7 @@ begin
         v.d.mexc        := (others => s_mexc);
         v.d.exctype     := (others => s_exctype);
         v.d.exchyper    := (others => s_exchyper);
-        v.d.tval2       := s_tval2;
+        v.d.tval2       := hamming_encode(std_ulogic_vector(s_tval2));
         v.d.tval2type   := s_tval2type;
         if r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
           -- v.d.buff.inst.d(31 downto 16) := v.d.inst(0)(15 downto 0);
