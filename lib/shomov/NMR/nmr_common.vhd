@@ -15,6 +15,12 @@ package nmr_common is
         c    : in std_ulogic
     ) return std_ulogic;
 
+    function tmr_has_error (
+        a    : in std_ulogic;
+        b    : in std_ulogic;
+        c    : in std_ulogic
+    ) return boolean;
+
 end;
 
 package body nmr_common is
@@ -47,6 +53,16 @@ package body nmr_common is
                 (b and c) or
                 (a and c);
         return res;
+    end;
+
+    function tmr_has_error (
+        a    : in std_ulogic;
+        b    : in std_ulogic;
+        c    : in std_ulogic
+        )
+    return boolean is
+    begin
+        return (a /= b) or (a /= c) or (b /= c);
     end;
 
 end;

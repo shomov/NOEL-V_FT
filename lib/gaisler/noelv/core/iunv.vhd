@@ -711,6 +711,15 @@ architecture rtl of iunv is
 
   type icdtype_ecc       is array (0 to iways - 1) of ecc_vector(WORD64_ECC_RANGE.left downto WORD64_ECC_RANGE.right);
 
+  function icdtype_has_error(icd : icdtype_ecc) return boolean is
+    variable res : boolean := FALSE;
+  begin
+    for i in icd'range loop
+      res := res or hamming_has_error(icd(i));
+    end loop;
+    return res;
+  end;
+
   -- PC Gen <-> Fetch Stage --------------------------------------------------
   type fetch_reg_type is record                       
     pc : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);         -- pc to be fetched
@@ -718,6 +727,15 @@ architecture rtl of iunv is
   end record;
 
   type way_arr           is array (0 to 2) of std_logic_vector(IWAYMSB downto 0);
+  
+  function way_has_error(way : way_arr) return boolean is
+    variable res : boolean := FALSE;
+  begin
+    for i in way'range loop
+      res := res or tmr_has_error(way(i)(0), way(i)(1), way(i)(2));
+    end loop;
+    return res;
+  end;
 
   -- Fetch Stage <-> Decode Stage --------------------------------------------
   type decode_reg_type is record
@@ -743,6 +761,17 @@ architecture rtl of iunv is
     unaligned   : std_ulogic_vector(2 downto 0);                                      -- unaligned compressed instruction flag due to previous fetched pair
 --    uninst      : iword16_type;                                                     -- unaligned compressed instruction
   end record;
+
+  function decode_has_error(decode : decode_reg_type) return boolean is
+  begin
+    return hamming_has_error(decode.pc) or icdtype_has_error(decode.inst) or
+      iqueue_has_error(decode.buff) or tmr_has_error(decode.valid(0), decode.valid(1), decode.valid(2)) or
+      way_has_error(decode.way) or tmr_has_error(decode.mexc(0), decode.mexc(1), decode.mexc(2)) or
+      tmr_has_error(decode.was_xc(0), decode.was_xc(1), decode.was_xc(2)) or tmr_has_error(decode.exctype(0), decode.exctype(1), decode.exctype(2)) or
+      tmr_has_error(decode.exchyper(0), decode.exchyper(1), decode.exchyper(2)) or hamming_has_error(decode.tval2) or
+      hamming_has_error(decode.tval2type) or prediction_array_has_error(decode.prediction) or
+      tmr_has_error(decode.unaligned(0), decode.unaligned(1), decode.unaligned(2));
+  end;
 
   -- Decode Stage <-> Register Access Stage -----------------------------------
   type regacc_reg_type is record

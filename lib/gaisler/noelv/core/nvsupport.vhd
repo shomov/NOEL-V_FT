@@ -62,7 +62,7 @@ use gaisler.noelvint.pmp_precalc_vec;
 use gaisler.noelvint.csr_out_cctrl_type;
 use gaisler.noelvint.csr_out_cctrl_rst;
 library shomov;
-use shomov.nmr_common.tmr_voter;
+use shomov.nmr_common.all;
 library extras;
 use extras.hamming_edac.all;
 
@@ -169,9 +169,14 @@ package nvsupport is
     taken       : std_ulogic_vector(2 downto 0);                          -- branch predicted to be taken
     hit         : std_ulogic_vector(2 downto 0);                          -- branch has been found in BTB
   end record;
+
+  type prediction_array_type is array (0 to 3) of prediction_type;
+  type prediction_array_type_ecc is array (0 to 3) of prediction_type_ecc;
   
   function to_prediction_type(ecc : prediction_type_ecc) return prediction_type;
   function to_prediction_type_ecc(start : prediction_type) return prediction_type_ecc;
+  function prediction_has_error(prediction : prediction_type_ecc) return boolean;
+  function prediction_array_has_error(prediction : prediction_array_type_ecc) return boolean;
 
   constant prediction_none : prediction_type := (
     taken       => '0',
@@ -182,9 +187,6 @@ package nvsupport is
     taken       => (others => '0'),
     hit         => (others => '0')
     );
-
-  type prediction_array_type is array (0 to 3) of prediction_type;
-  type prediction_array_type_ecc is array (0 to 3) of prediction_type_ecc;
   
   function to_prediction_array_type(start : prediction_array_type_ecc) return prediction_array_type;
 
@@ -225,6 +227,7 @@ package nvsupport is
 
   function to_iqueue_type(ecc : iqueue_type_ecc) return iqueue_type;
   function to_iqueue_type_ecc(start : iqueue_type) return iqueue_type_ecc;
+  function iqueue_has_error(iqueue : iqueue_type_ecc) return boolean;
 
   constant iqueue_none : iqueue_type := (
 --qqq    pc              => PC_RESET,
@@ -8040,6 +8043,15 @@ package body nvsupport is
     return res;
   end;
 
+  function iword_has_error(ecc : iword_type_ecc) return boolean is
+  begin
+    return hamming_has_error(ecc.lpc) or 
+      hamming_has_error(ecc.d) or 
+      hamming_has_error(ecc.dc) or 
+      hamming_has_error(ecc.xc) or 
+      tmr_has_error(ecc.c(0), ecc.c(1), ecc.c(2));
+  end;
+
 -- TODO: remove tmr_voter()
   function to_prediction_type(ecc : prediction_type_ecc) return prediction_type is
     variable res     : prediction_type;
@@ -8054,6 +8066,21 @@ package body nvsupport is
   begin
     res.taken := (others => start.taken);
     res.hit   := (others => start.hit);
+    return res;
+  end;
+
+  function prediction_has_error(prediction : prediction_type_ecc) return boolean is
+  begin
+    return tmr_has_error(prediction.taken(0), prediction.taken(1), prediction.taken(2)) or 
+      tmr_has_error(prediction.hit(0), prediction.hit(1), prediction.hit(2));
+  end;
+
+  function prediction_array_has_error(prediction : prediction_array_type_ecc) return boolean is
+    variable res     : boolean := FALSE;
+  begin
+    for i in prediction_array_type_ecc'range loop
+      res := res or prediction_has_error(prediction(i));
+    end loop;
     return res;
   end;
 
@@ -8095,6 +8122,33 @@ package body nvsupport is
     res.bjump_predicted := (others => start.bjump_predicted);
     res.prediction      := to_prediction_type_ecc(start.prediction);
     res.comp_ill        := (others => start.comp_ill);
+    return res;
+  end;
+  
+
+  -- type iqueue_type_ecc is record
+  --       pc              : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);            -- program counter
+  --       inst            : iword_type_ecc;                 -- instruction
+  --       cinst           : ecc_vector(WORD16_ECC_RANGE.left downto WORD16_ECC_RANGE.right);           -- compressed instruction
+  --       valid           : std_ulogic_vector(2 downto 0);  -- instruction buffer entry is valid
+  --       comp            : std_ulogic_vector(2 downto 0);  -- instruction buffer entry is compressed
+  --       xc              : std_ulogic_vector(2 downto 0);  -- instruction buffer entry has generated a trap in previous stages
+  --       bjump           : std_ulogic_vector(2 downto 0);  -- 1-> branch or jump inst
+  --       bjump_predicted : std_ulogic_vector(2 downto 0);  -- 1-> bjump already predicted before buffering
+  --       prediction      : prediction_type_ecc;            -- prediction as from the BHT
+  --       comp_ill        : std_ulogic_vector(2 downto 0);  -- compressed instruction is invalid
+  --     end record;
+
+
+  function iqueue_has_error(iqueue : iqueue_type_ecc) return boolean is
+    variable res : boolean;
+  begin
+    res := hamming_has_error(iqueue.pc) or iword_has_error(iqueue.inst) or 
+      hamming_has_error(iqueue.cinst) or tmr_has_error(iqueue.valid(0), iqueue.valid(1), iqueue.valid(2)) or 
+      tmr_has_error(iqueue.comp(0), iqueue.comp(1), iqueue.comp(2)) or tmr_has_error(iqueue.xc(0), iqueue.xc(1), iqueue.xc(2)) or 
+      tmr_has_error(iqueue.bjump(0), iqueue.bjump(1), iqueue.bjump(2)) or tmr_has_error(iqueue.bjump_predicted(0), iqueue.bjump_predicted(1), iqueue.bjump_predicted(2)) or 
+      prediction_has_error(iqueue.prediction) or tmr_has_error(iqueue.comp_ill(0), iqueue.comp_ill(1), iqueue.comp_ill(2));
+    
     return res;
   end;
 
