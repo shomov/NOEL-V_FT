@@ -730,8 +730,8 @@ architecture rtl of iunv is
     tval        : wordx;                                                              -- exception/trap value from previous stages
 
     way         : way_arr;                                                            -- cache way where instructions are located
-    mexc        : std_ulogic_vector(2 downto 0);                                                         -- error in cache access
-    was_xc      : std_ulogic;                                                         -- error just before
+    mexc        : std_ulogic_vector(2 downto 0);                                      -- error in cache access
+    was_xc      : std_ulogic_vector(2 downto 0);                                      -- error just before
     exctype     : std_ulogic;                                                         -- error type in cache access
     exchyper    : std_ulogic;                                                         -- Hypervisor exception in cache access
     tval2       : wordx;                                                              -- Hypervisor exception info from cache
@@ -1076,7 +1076,7 @@ architecture rtl of iunv is
     v.d.tval                    := zerox;
     v.d.way                     := (others => (others => '0'));
     v.d.mexc                    := (others => '0');
-    v.d.was_xc                  := '0';
+    v.d.was_xc                  := (others => '0');
     v.d.exctype                 := '0';
     v.d.exchyper                := '0';
     v.d.tval2                   := zerox;
@@ -10309,7 +10309,7 @@ begin
       end if;
     end loop;
 
-    if r.d.was_xc = '1' then
+    if tmr_voter(r.d.was_xc(0), r.d.was_xc(1), r.d.was_xc(2)) = '1' then
       de_to_ra_xc    := (others => '1');
       de_to_ra_cause := (others => XC_INST_ACCESS_FAULT);   -- To make sure NOP:ing is done in RA.
     end if;
@@ -10589,15 +10589,15 @@ begin
     -- Prevent unneeded fetching when exception on instruction out of decode,
     -- or in ra, ex or mem.
     -- Remember exception from last cycle?
-    if r.d.was_xc = '1' then
+    if tmr_voter(r.d.was_xc(0), r.d.was_xc(1), r.d.was_xc(2)) = '1' then
 --      de_inull := '1';
     end if;
     -- Flushing pipeline?
     if de_nullify = '1' then
-      v.d.was_xc := '0';
+      v.d.was_xc := (others => '0');
     -- New exception reported from DE? (irrelevant when holdn asserted)
     elsif not all_0(de_to_ra_xc and de_issue and de_inst_valid) then
-      v.d.was_xc    := '1';
+      v.d.was_xc    := (others => '1');
 --      de_inull := '1';
     end if;
 
