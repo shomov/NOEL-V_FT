@@ -733,7 +733,7 @@ architecture rtl of iunv is
     mexc        : std_ulogic_vector(2 downto 0);                                      -- error in cache access
     was_xc      : std_ulogic_vector(2 downto 0);                                      -- error just before
     exctype     : std_ulogic_vector(2 downto 0);                                      -- error type in cache access
-    exchyper    : std_ulogic;                                                         -- Hypervisor exception in cache access
+    exchyper    : std_ulogic_vector(2 downto 0);                                      -- Hypervisor exception in cache access
     tval2       : wordx;                                                              -- Hypervisor exception info from cache
     tval2type   : word2;                                                              -- Hypervisor exception info from cache
     prediction  : prediction_array_type;                                              -- BHT record
@@ -1078,7 +1078,7 @@ architecture rtl of iunv is
     v.d.mexc                    := (others => '0');
     v.d.was_xc                  := (others => '0');
     v.d.exctype                 := (others => '0');
-    v.d.exchyper                := '0';
+    v.d.exchyper                := (others => '0');
     v.d.tval2                   := zerox;
     v.d.tval2type               := "00";
     v.d.prediction              := (others => prediction_none);
@@ -9882,8 +9882,8 @@ begin
     de_rvc_aligned(0).xc   := "000";
     de_rvc_aligned(1).xc   := "000";
     if tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1' then
-      de_rvc_aligned(0).xc := r.d.exchyper & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
-      de_rvc_aligned(1).xc := r.d.exchyper & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
+      de_rvc_aligned(0).xc := tmr_voter(r.d.exchyper(0), r.d.exchyper(1), r.d.exchyper(2)) & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
+      de_rvc_aligned(1).xc := tmr_voter(r.d.exchyper(0), r.d.exchyper(1), r.d.exchyper(2)) & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
     -- In case it is lsb of an unaligned instruction,
     -- make it valid to take the trap.
       de_rvc_valid(0)      := '1';
@@ -10051,7 +10051,7 @@ begin
 
     de_buff_inst_xc   := "000";
     if r.d.unaligned = '1' and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' then
-      de_buff_inst_xc := r.d.exchyper & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
+      de_buff_inst_xc := tmr_voter(r.d.exchyper(0), r.d.exchyper(1), r.d.exchyper(2)) & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
     end if;
 
     -- New instructions
@@ -10657,7 +10657,7 @@ begin
       v.d.way         := (others => ico.way(IWAYMSB downto 0));   -- hit way
       v.d.mexc        := (others => ico.mexc);                    -- access exception
       v.d.exctype     := (others => ico.exctype);
-      v.d.exchyper    := ico.exchyper;
+      v.d.exchyper    := (others => ico.exchyper);
       v.d.tval2       := ico.addrhyper(XLEN-1 downto 0);
       v.d.tval2type   := ico.typehyper;
       -- Progam buffer
@@ -10674,7 +10674,7 @@ begin
         v.d.way       := (others => (others => '0'));
         v.d.mexc      := (others => '0');
         v.d.exctype   := (others => '0');
-        v.d.exchyper  := '0';
+        v.d.exchyper  := (others => '0');
         v.d.tval2     := zerox;
         v.d.tval2type := "00";
       end if;
@@ -11257,9 +11257,9 @@ begin
 
     s_inst      := v.d.inst;
     s_way       := std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.d.way(0)), std_ulogic_vector(v.d.way(1)), std_ulogic_vector(v.d.way(2))));
-    s_mexc      := tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2));
-    s_exctype   := tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2));
-    s_exchyper  := v.d.exchyper;
+    s_mexc      := tmr_voter(v.d.mexc(0), v.d.mexc(1), v.d.mexc(2));
+    s_exctype   := tmr_voter(v.d.exctype(0), v.d.exctype(1), v.d.exctype(2));
+    s_exchyper  := tmr_voter(v.d.exchyper(0), v.d.exchyper(1), v.d.exchyper(2));
     s_tval2     := v.d.tval2;
     s_tval2type := v.d.tval2type;
     s_fpu_wait  := v.e.fpu_wait;
@@ -11291,7 +11291,7 @@ begin
         v.d.way         := (others => s_way);
         v.d.mexc        := (others => s_mexc);
         v.d.exctype     := (others => s_exctype);
-        v.d.exchyper    := s_exchyper;
+        v.d.exchyper    := (others => s_exchyper);
         v.d.tval2       := s_tval2;
         v.d.tval2type   := s_tval2type;
         if r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
@@ -11326,7 +11326,7 @@ begin
         v.d.way         := (others => s_way);
         v.d.mexc        := (others => s_mexc);
         v.d.exctype     := (others => s_exctype);
-        v.d.exchyper    := s_exchyper;
+        v.d.exchyper    := (others => s_exchyper);
         v.d.tval2       := s_tval2;
         v.d.tval2type   := s_tval2type;
         if r.d.unaligned = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
