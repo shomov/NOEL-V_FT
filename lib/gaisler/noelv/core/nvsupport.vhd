@@ -61,6 +61,10 @@ use gaisler.noelvint.pmp_precalc_type;
 use gaisler.noelvint.pmp_precalc_vec;
 use gaisler.noelvint.csr_out_cctrl_type;
 use gaisler.noelvint.csr_out_cctrl_rst;
+library shomov;
+use shomov.nmr_common.tmr_voter;
+library extras;
+use extras.hamming_edac.all;
 
 package nvsupport is
 
@@ -123,6 +127,33 @@ package nvsupport is
     c   : std_ulogic;
   end record;
 
+
+  constant LPC_ECC_RANGE   : ecc_range := hamming_indices(2);
+  constant WORD_ECC_RANGE  : ecc_range := hamming_indices(word'length);
+  constant WORD16_ECC_RANGE  : ecc_range := hamming_indices(word16'length);
+  constant WORD3_ECC_RANGE  : ecc_range := hamming_indices(word3'length);
+
+  type iword_type_ecc is record
+    lpc : ecc_vector(LPC_ECC_RANGE.left downto LPC_ECC_RANGE.right);
+    d   : ecc_vector(WORD_ECC_RANGE.left downto WORD_ECC_RANGE.right);
+    dc  : ecc_vector(WORD16_ECC_RANGE.left downto WORD16_ECC_RANGE.right);
+    xc  : ecc_vector(WORD3_ECC_RANGE.left downto WORD3_ECC_RANGE.right);
+    c   : std_ulogic_vector(2 downto 0);
+  end record;
+
+  
+  function to_iword_type(ecc : iword_type_ecc) return iword_type;
+  function to_iword_type_ecc(start : iword_type) return iword_type_ecc;
+
+  
+  constant iword_type_ecc_none : iword_type_ecc := (
+    lpc       => (others => '0'),
+    d         => (others => '0'),
+    dc        => (others => '0'),
+    xc        => (others => '0'),
+    c         => (others => '0')
+    );
+
   constant fetch          : std_logic_vector(0 to 1) := (others => '0');    -- Used as range.
   subtype fetch_pair     is std_logic_vector(fetch'high downto fetch'low);  -- Must be n downto 0!
   type iword_pair_type   is array (fetch'range) of iword_type;
@@ -133,11 +164,23 @@ package nvsupport is
 --    dir         : std_logic_vector(bhti.wdata'range);  -- bht branch output
     hit         : std_ulogic;                          -- branch has been found in BTB
   end record;
+  
+  type prediction_type_ecc is record
+    taken       : std_ulogic_vector(2 downto 0);                          -- branch predicted to be taken
+    hit         : std_ulogic_vector(2 downto 0);                          -- branch has been found in BTB
+  end record;
+  
+  function to_prediction_type(ecc : prediction_type_ecc) return prediction_type;
+  function to_prediction_type_ecc(start : prediction_type) return prediction_type_ecc;
 
   constant prediction_none : prediction_type := (
     taken       => '0',
 --    dir         => (others => '0'),
     hit         => '0'
+    );
+  constant prediction_ecc_none : prediction_type_ecc := (
+    taken       => (others => '0'),
+    hit         => (others => '0')
     );
 
   type prediction_array_type is array (0 to 3) of prediction_type;
@@ -146,18 +189,39 @@ package nvsupport is
   -- The instruction queue is a single-entry instruction buffer located in the
   -- decode stage.
   type iqueue_type is record
---    pc              : pctype;           -- program counter
-    pc              : wordx;            -- program counter
-    inst            : iword_type;       -- instruction
-    cinst           : word16;           -- compressed instruction
-    valid           : std_ulogic;       -- instruction buffer entry is valid
-    comp            : std_ulogic;  -- instruction buffer entry is compressed
-    xc              : std_ulogic;  -- instruction buffer entry has generated a trap in previous stages
-    bjump           : std_ulogic;       -- 1-> branch or jump inst
-    bjump_predicted : std_ulogic;       -- 1-> bjump already predicted before buffering
-    prediction      : prediction_type;  -- prediction as from the BHT
-    comp_ill        : std_ulogic; --compressed instruction is invalid
+    --    pc              : pctype;           -- program counter
+        pc              : wordx;            -- program counter
+        inst            : iword_type;       -- instruction
+        cinst           : word16;           -- compressed instruction
+        valid           : std_ulogic;       -- instruction buffer entry is valid
+        comp            : std_ulogic;       -- instruction buffer entry is compressed
+        xc              : std_ulogic;       -- instruction buffer entry has generated a trap in previous stages
+        bjump           : std_ulogic;       -- 1-> branch or jump inst
+        bjump_predicted : std_ulogic;       -- 1-> bjump already predicted before buffering
+        prediction      : prediction_type;  -- prediction as from the BHT
+        comp_ill        : std_ulogic;       --compressed instruction is invalid
   end record;
+      
+  constant WORDX_ECC_RANGE   : ecc_range := hamming_indices(wordx'length);
+  -- constant PCTYPE_ECC_RANGE   : ecc_range := hamming_indices(pctype'length);
+  -- constant PCTYPE_ECC_RANGE   : ecc_range := hamming_indices(pctype'length);
+
+  type iqueue_type_ecc is record
+--    pc              : pctype;           -- program counter
+    pc              : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);            -- program counter
+    inst            : iword_type_ecc;                 -- instruction
+    cinst           : ecc_vector(WORD16_ECC_RANGE.left downto WORD16_ECC_RANGE.right);           -- compressed instruction
+    valid           : std_ulogic_vector(2 downto 0);  -- instruction buffer entry is valid
+    comp            : std_ulogic_vector(2 downto 0);  -- instruction buffer entry is compressed
+    xc              : std_ulogic_vector(2 downto 0);  -- instruction buffer entry has generated a trap in previous stages
+    bjump           : std_ulogic_vector(2 downto 0);  -- 1-> branch or jump inst
+    bjump_predicted : std_ulogic_vector(2 downto 0);  -- 1-> bjump already predicted before buffering
+    prediction      : prediction_type_ecc;            -- prediction as from the BHT
+    comp_ill        : std_ulogic_vector(2 downto 0);  -- compressed instruction is invalid
+  end record;
+
+  function to_iqueue_type(ecc : iqueue_type_ecc) return iqueue_type;
+  function to_iqueue_type_ecc(start : iqueue_type) return iqueue_type_ecc;
 
   constant iqueue_none : iqueue_type := (
 --qqq    pc              => PC_RESET,
@@ -173,6 +237,21 @@ package nvsupport is
     prediction      => prediction_none,
     comp_ill        => '0'
     );
+
+    constant iqueue_ecc_none : iqueue_type_ecc := (
+      pc              => (others => '0'),
+      inst            => iword_type_ecc_none,
+      cinst           => (others => '0'),
+      -- cinst           => hamming_encode("0"),
+      valid           => (others => '0'),
+      comp            => (others => '0'),
+      xc              => (others => '0'),
+      bjump           => (others => '0'),
+      bjump_predicted => (others => '0'),
+      prediction      => prediction_ecc_none,
+      comp_ill        => (others => '0')
+      );
+      
 
   type lane_select is record
     fpu    : integer range 0 to 1;
@@ -656,7 +735,7 @@ package nvsupport is
                       unaligned      : in  std_ulogic;
                       issue_in       : in  std_logic_vector;
                       hold_pc        : out std_ulogic;
-                      buff_valid     : out std_ulogic);
+                      buff_valid     : out std_ulogic_vector(2 downto 0));
 
   procedure imm_gen(inst_in   : in  word;
                     valid_out : out std_ulogic;
@@ -4615,10 +4694,10 @@ package body nvsupport is
                       unaligned      : in  std_ulogic;
                       issue_in       : in  std_logic_vector;
                       hold_pc        : out std_ulogic;
-                      buff_valid     : out std_ulogic) is
+                      buff_valid     : out std_ulogic_vector(2 downto 0)) is
     variable single_issue : integer := is_enabled(active, x_single_issue);
   begin
-    buff_valid := '0';
+    buff_valid := (others => '0');
     hold_pc    := '0';
 
     if buffer_third = '1' then
@@ -4626,7 +4705,7 @@ package body nvsupport is
       -- in order to buffer all other instructions must be consumed
       if ((valid_in(0) = '1' and issue_in(0) = '1') or (valid_in(0) = '0')) and
          ((valid_in(1) = '1' and issue_in(1) = '1') or (valid_in(1) = '0')) then
-        buff_valid := '1';
+        buff_valid := (others => '1');
       end if;
 
       if valid_in(1) = '1' and issue_in(1) = '0' then
@@ -4636,16 +4715,16 @@ package body nvsupport is
       if r_d_buff_valid = '1' and single_issue = 0  then
         -- If buffer is valid also that means there will be at
         -- least two instructions left to issue, so don't buffer.
-        buff_valid       := '0';
+        buff_valid       := (others => '0');
         hold_pc          := '1';
         if unaligned = '1' then
           -- If unaligned is asserted there might be less than three instructions.
           if dvalid_in(0) = '0' then
-            buff_valid   := '1';
+            buff_valid := (others => '1');
             hold_pc      := '0';
           elsif dvalid_in(0) = '1' and dvalid_in(1) = '0' then
             if issue_in(1) = '1' then
-              buff_valid := '1';
+              buff_valid := (others => '1');
               hold_pc    := '0';
             end if;
           end if;
@@ -4658,23 +4737,23 @@ package body nvsupport is
     if buffer_sec = '1' and issue_in(1) = '0' then
       -- Buffer second instructions, when buffer_sec is asserted second instruction
       -- is always valid.
-      buff_valid := '1';
+      buff_valid := (others => '1');
     end if;
 
     if r_d_buff_valid = '1' and buffer_sec = '1' then
       if issue_in(1) = '0' then
         -- If buffer is also valid that means two instructions will left on
         -- regular queue don't buffer.
-        buff_valid := '0';
+        buff_valid := (others => '0');
         hold_pc    := '1';
       else
-        buff_valid := '1';
+        buff_valid := (others => '1');
       end if;
     end if;
 
     if r_d_buff_valid = '1' and buffer_first = '1' then
       if issue_in(1) = '0' then
-        buff_valid := '1';
+        buff_valid := (others => '1');
       end if;
     end if;
 
@@ -7935,5 +8014,77 @@ package body nvsupport is
 
     return ret;
   end;
+
+  function to_iword_type(ecc : iword_type_ecc) return iword_type is
+    variable res     : iword_type;
+  begin
+    res.lpc := std_logic_vector(get_data(ecc.lpc));
+    res.d   := word(get_data(ecc.d));
+    res.dc  := word16(get_data(ecc.dc));
+    res.xc  := word3(get_data(ecc.xc));
+    res.c   := tmr_voter(ecc.c(0), ecc.c(1), ecc.c(2));
+    return res;
+  end;
+
+  function to_iword_type_ecc(start : iword_type) return iword_type_ecc is
+    variable res     : iword_type_ecc;
+  begin
+    res.lpc := hamming_encode(std_ulogic_vector(start.lpc));
+    res.d   := hamming_encode(std_ulogic_vector(start.d));
+    res.dc  := hamming_encode(std_ulogic_vector(start.dc));
+    res.xc  := hamming_encode(std_ulogic_vector(start.xc));
+    res.c   := (others => start.c);
+    return res;
+  end;
+
+
+  function to_prediction_type(ecc : prediction_type_ecc) return prediction_type is
+    variable res     : prediction_type;
+  begin
+    res.taken := tmr_voter(ecc.taken(0), ecc.taken(1), ecc.taken(2));
+    res.hit   := tmr_voter(ecc.hit(0), ecc.hit(1), ecc.hit(2));
+    return res;
+  end;
+
+  function to_prediction_type_ecc(start : prediction_type) return prediction_type_ecc is
+    variable res     : prediction_type_ecc;
+  begin
+    res.taken := (others => start.taken);
+    res.hit   := (others => start.hit);
+    return res;
+  end;
+
+  function to_iqueue_type(ecc : iqueue_type_ecc) return iqueue_type is
+    variable res     : iqueue_type;
+  begin
+    res.pc              := std_logic_vector(get_data(ecc.pc));
+    res.inst            := to_iword_type(ecc.inst);
+    res.cinst           := std_logic_vector(get_data(ecc.cinst));
+    res.valid           := tmr_voter(ecc.valid(0), ecc.valid(1), ecc.valid(2));
+    res.comp            := tmr_voter(ecc.comp(0), ecc.comp(1), ecc.comp(2));
+    res.xc              := tmr_voter(ecc.xc(0), ecc.xc(1), ecc.xc(2));
+    res.bjump           := tmr_voter(ecc.bjump(0), ecc.bjump(1), ecc.bjump(2));
+    res.bjump_predicted := tmr_voter(ecc.bjump_predicted(0), ecc.bjump_predicted(1), ecc.bjump_predicted(2));
+    res.prediction      := to_prediction_type(ecc.prediction);
+    res.comp_ill        := tmr_voter(ecc.comp_ill(0), ecc.comp_ill(1), ecc.comp_ill(2));
+    return res;
+  end;
+
+  function to_iqueue_type_ecc(start : iqueue_type) return iqueue_type_ecc is
+    variable res     : iqueue_type_ecc;
+  begin
+    res.pc              := hamming_encode(std_ulogic_vector(start.pc));
+    res.inst            := to_iword_type_ecc(start.inst);
+    res.cinst           := hamming_encode(std_ulogic_vector(start.cinst));
+    res.valid           := (others => start.valid);
+    res.comp            := (others => start.comp);
+    res.xc              := (others => start.xc);
+    res.bjump           := (others => start.bjump);
+    res.bjump_predicted := (others => start.bjump_predicted);
+    res.prediction      := to_prediction_type_ecc(start.prediction);
+    res.comp_ill        := (others => start.comp_ill);
+    return res;
+  end;
+
 
 end;
