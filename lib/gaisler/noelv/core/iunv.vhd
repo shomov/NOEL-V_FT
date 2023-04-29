@@ -731,8 +731,8 @@ architecture rtl of iunv is
   function way_has_error(way : way_arr) return boolean is
     variable res : boolean := FALSE;
   begin
-    for i in way'range loop
-      res := res or tmr_has_error(way(i)(0), way(i)(1), way(i)(2));
+    for i in way(0)'range loop
+      res := res or tmr_has_error(way(0)(i), way(1)(i), way(2)(i));
     end loop;
     return res;
   end;
@@ -764,13 +764,21 @@ architecture rtl of iunv is
 
   function decode_has_error(decode : decode_reg_type) return boolean is
   begin
-    return hamming_has_error(decode.pc) or icdtype_has_error(decode.inst) or
-      iqueue_has_error(decode.buff) or tmr_has_error(decode.valid(0), decode.valid(1), decode.valid(2)) or
-      way_has_error(decode.way) or tmr_has_error(decode.mexc(0), decode.mexc(1), decode.mexc(2)) or
-      tmr_has_error(decode.was_xc(0), decode.was_xc(1), decode.was_xc(2)) or tmr_has_error(decode.exctype(0), decode.exctype(1), decode.exctype(2)) or
-      tmr_has_error(decode.exchyper(0), decode.exchyper(1), decode.exchyper(2)) or hamming_has_error(decode.tval2) or
-      hamming_has_error(decode.tval2type) or prediction_array_has_error(decode.prediction) or
-      tmr_has_error(decode.unaligned(0), decode.unaligned(1), decode.unaligned(2));
+    -- return hamming_has_error(decode.pc) or icdtype_has_error(decode.inst);
+      -- return hamming_has_error(decode.pc) or 
+      --   icdtype_has_error(decode.inst) or
+      --   iqueue_has_error(decode.buff) or 
+      --   tmr_has_error(decode.valid(0), decode.valid(1), decode.valid(2)) or
+      --   way_has_error(decode.way) or tmr_has_error(decode.mexc(0), decode.mexc(1), decode.mexc(2)) or
+      --   tmr_has_error(decode.was_xc(0), decode.was_xc(1), decode.was_xc(2)) or tmr_has_error(decode.exctype(0), decode.exctype(1), decode.exctype(2)) or
+      --   tmr_has_error(decode.exchyper(0), decode.exchyper(1), decode.exchyper(2)) or hamming_has_error(decode.tval2) or
+      --   hamming_has_error(decode.tval2type) or prediction_array_has_error(decode.prediction) or
+      --   tmr_has_error(decode.unaligned(0), decode.unaligned(1), decode.unaligned(2));
+
+      
+      return hamming_has_error(decode.pc) or tmr_has_error(decode.valid(0), decode.valid(1), decode.valid(2)) or tmr_has_error(decode.mexc(0), decode.mexc(1), decode.mexc(2)) or tmr_has_error(decode.was_xc(0), decode.was_xc(1), decode.was_xc(2)) or tmr_has_error(decode.unaligned(0), decode.unaligned(1), decode.unaligned(2));
+      
+      -- return hamming_has_error(decode.pc);
   end;
 
   -- Decode Stage <-> Register Access Stage -----------------------------------
@@ -6835,10 +6843,14 @@ architecture rtl of iunv is
 
     -- Faults detection 
     if fault_protection = 1 then
-        if hamming_has_error(r.f.pc) or r.f.valid(0) /= r.f.valid(1) or r.f.valid(0) /= r.f.valid(2) or r.f.valid(1) /= r.f.valid(2) then
-          faults.f := TRUE;
-          hold := '1';
-        end if;
+      if hamming_has_error(r.f.pc) or r.f.valid(0) /= r.f.valid(1) or r.f.valid(0) /= r.f.valid(2) or r.f.valid(1) /= r.f.valid(2) then
+        faults.f := TRUE;
+        hold := '1';
+      end if;
+      if decode_has_error(r.d) then
+        faults.d := TRUE;
+        hold := '1';
+      end if;
 
     end if;
     
@@ -9882,7 +9894,7 @@ begin
     rvc_aligner(active_extensions,
                 de_inst,                      -- in  : Fetch Instructions
                 std_logic_vector(get_data(r.d.pc)),                       -- in  : Decode PC
-                tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)),                    -- in  : Valid Instructions
+                r.d.valid(0),      -- in  : Valid Instructions
                 not (r.csr.mstatus.fs = "00" or
                 (r.csr.v = '1' and r.csr.vsstatus.fs = "00")),
                 de_rvc_aligned,               -- out : Aligned Instructions
@@ -9912,9 +9924,9 @@ begin
 
     de_rvc_aligned(0).xc   := "000";
     de_rvc_aligned(1).xc   := "000";
-    if tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1' then
-      de_rvc_aligned(0).xc := tmr_voter(r.d.exchyper(0), r.d.exchyper(1), r.d.exchyper(2)) & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
-      de_rvc_aligned(1).xc := tmr_voter(r.d.exchyper(0), r.d.exchyper(1), r.d.exchyper(2)) & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
+    if r.d.mexc(0) = '1' and r.d.valid(0) = '1' then
+      de_rvc_aligned(0).xc := r.d.exchyper(0) & r.d.exctype(0) & '1';
+      de_rvc_aligned(1).xc := r.d.exchyper(0) & r.d.exctype(0) & '1';
     -- In case it is lsb of an unaligned instruction,
     -- make it valid to take the trap.
       de_rvc_valid(0)      := '1';
@@ -9943,7 +9955,7 @@ begin
               de_inst,
               to_iqueue_type(r.d.buff),
               to_prediction_array_type(r.d.prediction),
-              tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)),
+              r.d.valid(0),
               std_logic_vector(get_data(r.d.pc)),
               de_bjump_buff,
               de_bjump,
@@ -10075,14 +10087,14 @@ begin
       de_rvc_btb_hit(1)    := to_prediction_type(r.d.prediction(3)).hit;
     end if;
 
-    if tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
+    if v.d.valid(0) = '1' then
       v.d.buff.bjump_predicted := (others => '0');
       v.d.buff.xc              := (others => '0');
     end if;
 
     de_buff_inst_xc   := "000";
-    if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' then
-      de_buff_inst_xc := tmr_voter(r.d.exchyper(0), r.d.exchyper(1), r.d.exchyper(2)) & tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)) & '1';
+    if r.d.unaligned(0) = '1' and r.d.mexc(0) = '1' then
+      de_buff_inst_xc := r.d.exchyper(0) & r.d.exctype(0) & '1';
     end if;
 
     -- New instructions
@@ -10094,11 +10106,11 @@ begin
     de_comp          := de_rvc_comp;
     de_rvc_xc        := de_rvc_illegal;
     de_inst_no_buf   := "00";
-    de_inst_mexc     := tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) & tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2));
+    de_inst_mexc     := r.d.mexc(0) & r.d.mexc(0);
     de_inst_comp_ill := de_rvc_comp_ill;
     if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
       -- Only add one new instruction.
-      de_inst_xc_msb       := tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2));  -- Unaligned [31:16] exception
+      de_inst_xc_msb       := r.d.unaligned(0) and r.d.mexc(0);  -- Unaligned [31:16] exception
       de_inst_mexc(0)      := de_inst_xc_msb;
       de_inst_buff(1)      := de_mux_instruction(0);
       de_inst_buff(0)      := to_iword_type(r.d.buff.inst);
@@ -10172,7 +10184,7 @@ begin
                        r.csr.dfeaturesen.dual_dis,
                        r.csr.dcsr.step,   -- in  : DCSR step
                        r.a.lalu_pre,      -- in  : Late ALUs from RA
-                       tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)),          -- in  : Fetch exception
+                       r.d.mexc(0),          -- in  : Fetch exception
                        rd(v, e, 0),       -- in  : rd register from RA
                        v.e.ctrl(0).rdv,   -- in  : Valid rd register from RA
                        rd(v, e, 1),       -- in  : rd register from RA
@@ -10202,14 +10214,14 @@ begin
               de_rvc_buffer_third,      -- in  : Buffer third inst
               de_rvc_buffer_sec,        -- in  : Buffer sec inst
               de_rvc_buffer_first,      -- in  : Buffer first
-              tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)),            -- in  : Unaligned
+              v.d.valid(0),            -- in  : Unaligned
               de_issue,                 -- in  : Instruction Issue Valid Signals
               de_hold_pc,               -- out : Hold PC
               -- v.d.buff.valid => (others => buff_valid)           -- out : Buffer valid
               v.d.buff.valid           -- out : Buffer valid
               );
 
-    if tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1' then
+    if r.d.mexc(0) = '1' and r.d.valid(0) = '1' then
       v.d.buff.valid := (others => '0');
     end if;
 
@@ -10319,15 +10331,15 @@ begin
       de_to_ra_tval(1)     := pc2xlen(de_pc(1));
     end if;
 
-    if tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '0' or
-                           (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' 
-                                and tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1')) then
+    if r.d.mexc(0) = '1' and (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '0' or
+                           (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and r.d.unaligned(0) = '1' 
+                                and r.d.mexc(0) = '1')) then
       de_inst_valid(1) := '0';
     end if;
 
     -- inull icache after encountering an instruction memory exception
     mexc_inull   := '0';
-    if (tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)) = '1' and tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)) = '1') then
+    if (r.d.mexc(0) = '1' and r.d.valid(0) = '1') then
       mexc_inull := '1';
     end if;
 
@@ -10340,7 +10352,7 @@ begin
       end if;
     end loop;
 
-    if tmr_voter(r.d.was_xc(0), r.d.was_xc(1), r.d.was_xc(2)) = '1' then
+    if r.d.was_xc(0) = '1' then
       de_to_ra_xc    := (others => '1');
       de_to_ra_cause := (others => XC_INST_ACCESS_FAULT);   -- To make sure NOP:ing is done in RA.
     end if;
@@ -10605,7 +10617,7 @@ begin
           end if;
         end loop;
       end if;
-      if de_btb_taken_buff = '1' and tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' then
+      if de_btb_taken_buff = '1' and r.d.unaligned(0) = '1' then
         v.d.buff.valid := (others => '0');
       end if;
     end if;
@@ -10620,7 +10632,7 @@ begin
     -- Prevent unneeded fetching when exception on instruction out of decode,
     -- or in ra, ex or mem.
     -- Remember exception from last cycle?
-    if tmr_voter(r.d.was_xc(0), r.d.was_xc(1), r.d.was_xc(2)) = '1' then
+    if r.d.was_xc(0) = '1' then
 --      de_inull := '1';
     end if;
     -- Flushing pipeline?
@@ -10712,12 +10724,14 @@ begin
     end if;
 
     -- Buffer the MSB of the unaligned instruction
-    if de_rvc_buffer_third = '1' and tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
-      v.d.buff.inst.d := hamming_encode(get_data(v.d.buff.inst.d(31 downto 16)) & get_data(v.d.inst(0))(15 downto 0));
+    if de_rvc_buffer_third = '1' and v.d.valid(0) = '1' then
+      -- v.d.buff.inst.d(31 downto 16) := v.d.inst(0)(15 downto 0);
+      v.d.buff.inst.d := hamming_encode(get_data(v.d.inst(0)(15 downto 0)) & get_data(v.d.buff.inst.d)(15 downto 0));
     end if;
 
-    if ico.mds = '0' and tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
-      v.d.buff.inst.d := hamming_encode(get_data(v.d.buff.inst.d(31 downto 16)) & get_data(v.d.inst(0))(15 downto 0));
+    if ico.mds = '0' and r.d.unaligned(0) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+      -- v.d.buff.inst.d(31 downto 16) := v.d.inst(0)(15 downto 0);
+      v.d.buff.inst.d := hamming_encode(get_data(v.d.inst(0))(15 downto 0) & get_data(v.d.buff.inst.d)(15 downto 0));
     end if;
 
 
@@ -10760,7 +10774,7 @@ begin
             v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
           end if;
 
-          if tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
+          if v.d.valid(0) = '1' then
             if de_rvc_valid(0) = '1' and de_issue(1) = '0' then
               v.d.pc := r.d.pc;
             elsif de_rvc_valid(0)= '1' and de_issue(1) = '1' then
@@ -10781,7 +10795,7 @@ begin
       end if;
     end if;
 
-    if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
+    if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and v.d.valid(0) = '1' then
       v.d.pc := hamming_encode(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 2) & "10");
     end if;
 
@@ -10894,7 +10908,7 @@ begin
           to_prediction_type(v.d.prediction(0)).taken = '1' and de_btb_valid(0) = '1' then
         v.d.prediction(0).hit := (others => '1');
         de_hit                := '1';
-        if tmr_voter(v.d.valid(0), v.d.valid(1), v.d.valid(2)) = '1' then
+        if v.d.valid(0) = '1' then
           v.d.buff.prediction.hit   := (others => '1');
           v.d.buff.prediction.taken := v.d.prediction(0).taken;
           v.d.prediction(0).hit     := (others => '0');
@@ -11287,10 +11301,10 @@ begin
     -----------------------------------------------------------------------
 
     s_inst      := v.d.inst;
-    s_way       := std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.d.way(0)), std_ulogic_vector(v.d.way(1)), std_ulogic_vector(v.d.way(2))));
-    s_mexc      := tmr_voter(v.d.mexc(0), v.d.mexc(1), v.d.mexc(2));
-    s_exctype   := tmr_voter(v.d.exctype(0), v.d.exctype(1), v.d.exctype(2));
-    s_exchyper  := tmr_voter(v.d.exchyper(0), v.d.exchyper(1), v.d.exchyper(2));
+    s_way       := v.d.way(0);
+    s_mexc      := v.d.mexc(0);
+    s_exctype   := v.d.exctype(0);
+    s_exchyper  := v.d.exchyper(0);
     s_tval2     := wordx(get_data(v.d.tval2));
     s_tval2type := word2(get_data(v.d.tval2type));
     s_fpu_wait  := v.e.fpu_wait;
@@ -11307,7 +11321,34 @@ begin
         v.f := r.f;
       end if;
 
-      v.d := r.d;
+      if ic_fault.d = TRUE then
+        v.d.pc        := hamming_encode(hamming_decode(r.d.pc));
+        v.d.inst      := r.d.inst;
+        v.d.buff      := r.d.buff;
+        v.d.valid     := (others => tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)));
+        v.d.xc        := r.d.xc;
+        v.d.cause     := r.d.cause;
+        v.d.inst      := r.d.inst;
+
+        -- for i in r.d.inst'range loop
+        --   v.d.inst(i) := hamming_encode(hamming_decode(v.d.inst(i)));
+        -- end loop;
+
+        v.d.way       := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(r.d.way(0)), std_ulogic_vector(r.d.way(1)), std_ulogic_vector(r.d.way(2)))));
+        v.d.mexc      := (others => tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)));
+        v.d.was_xc    := (others => tmr_voter(r.d.was_xc(0), r.d.was_xc(1), r.d.was_xc(2)));
+        v.d.exctype   := (others => tmr_voter(r.d.exctype(0), r.d.exctype(1), r.d.exctype(2)));
+        v.d.exchyper  := (others => tmr_voter(r.d.exchyper(0), r.d.exchyper(1), r.d.exchyper(2)));
+        v.d.tval2     := hamming_encode(hamming_decode(r.d.tval2));
+        v.d.tval2type := hamming_encode(hamming_decode(r.d.tval2type));
+        v.d.prediction:= r.d.prediction;
+        v.d.hit       := r.d.hit;
+        v.d.unaligned := (others => tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)));
+
+      else
+        v.d := r.d;
+      end if;
+
       v.a := r.a;
       -- Bubbles in Execute Stage
       for i in lanes'range loop
@@ -11325,7 +11366,7 @@ begin
         v.d.exchyper    := (others => s_exchyper);
         v.d.tval2       := hamming_encode(std_ulogic_vector(s_tval2));
         v.d.tval2type   := hamming_encode(std_ulogic_vector(s_tval2type));
-        if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+        if r.d.unaligned(0) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
           -- v.d.buff.inst.d(31 downto 16) := std_logic_vector(get_data(v.d.inst(0))(15 downto 0));
           v.d.buff.inst.d := hamming_encode(get_data(v.d.inst(0))(15 downto 0) & get_data(v.d.buff.inst.d)(15 downto 0));
         end if;
@@ -11360,7 +11401,7 @@ begin
         v.d.exchyper    := (others => s_exchyper);
         v.d.tval2       := hamming_encode(std_ulogic_vector(s_tval2));
         v.d.tval2type   := hamming_encode(std_ulogic_vector(s_tval2type));
-        if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+        if r.d.unaligned(0) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
           -- v.d.buff.inst.d(31 downto 16) := v.d.inst(0)(15 downto 0);
           v.d.buff.inst.d := hamming_encode(get_data(v.d.inst(0))(15 downto 0) & get_data(v.d.buff.inst.d)(15 downto 0));
         end if;
@@ -11777,7 +11818,7 @@ begin
           -- I Cache Miss
           if ico.mds = '0' then
             r.d.inst       <= rin.d.inst;
-            if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+            if r.d.unaligned(0) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
               -- r.d.buff.inst.d(31 downto 16) <= rin.d.buff.inst.d(31 downto 16);
               r.d.buff.inst.d <= hamming_encode(get_data(rin.d.buff.inst.d)(31 downto 16) & get_data(r.d.buff.inst.d)(15 downto 0));
             end if;
@@ -11893,7 +11934,7 @@ begin
               r.d.tval2     <= rin.d.tval2;
               r.d.tval2type <= rin.d.tval2type;
               r.d.way       <= rin.d.way;
-              if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2))  = '1' then
+              if r.d.unaligned(0) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2))  = '1' then
                 r.d.buff.inst.d(31 downto 16) <= rin.d.buff.inst.d(31 downto 16);
               end if;
             end if;
@@ -11957,7 +11998,7 @@ begin
               r.d.tval2     <= rin.d.tval2;
               r.d.tval2type <= rin.d.tval2type;
               r.d.way       <= rin.d.way;
-              if tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+              if r.d.unaligned(0) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
                 r.d.buff.inst.d(31 downto 16) <= rin.d.buff.inst.d(31 downto 16);
               end if;
             end if;

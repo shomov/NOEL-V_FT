@@ -8149,7 +8149,7 @@ package body nvsupport is
       tmr_has_error(iqueue.bjump(0), iqueue.bjump(1), iqueue.bjump(2)) or tmr_has_error(iqueue.bjump_predicted(0), iqueue.bjump_predicted(1), iqueue.bjump_predicted(2)) or 
       prediction_has_error(iqueue.prediction) or tmr_has_error(iqueue.comp_ill(0), iqueue.comp_ill(1), iqueue.comp_ill(2));
     
-    return res;
+    return false;
   end;
 
 
