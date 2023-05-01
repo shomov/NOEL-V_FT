@@ -8125,21 +8125,6 @@ package body nvsupport is
     return res;
   end;
   
-
-  -- type iqueue_type_ecc is record
-  --       pc              : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);            -- program counter
-  --       inst            : iword_type_ecc;                 -- instruction
-  --       cinst           : ecc_vector(WORD16_ECC_RANGE.left downto WORD16_ECC_RANGE.right);           -- compressed instruction
-  --       valid           : std_ulogic_vector(2 downto 0);  -- instruction buffer entry is valid
-  --       comp            : std_ulogic_vector(2 downto 0);  -- instruction buffer entry is compressed
-  --       xc              : std_ulogic_vector(2 downto 0);  -- instruction buffer entry has generated a trap in previous stages
-  --       bjump           : std_ulogic_vector(2 downto 0);  -- 1-> branch or jump inst
-  --       bjump_predicted : std_ulogic_vector(2 downto 0);  -- 1-> bjump already predicted before buffering
-  --       prediction      : prediction_type_ecc;            -- prediction as from the BHT
-  --       comp_ill        : std_ulogic_vector(2 downto 0);  -- compressed instruction is invalid
-  --     end record;
-
-
   function iqueue_has_error(iqueue : iqueue_type_ecc) return boolean is
     variable res : boolean;
   begin
