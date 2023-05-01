@@ -759,26 +759,32 @@ architecture rtl of iunv is
     prediction  : prediction_array_type_ecc;                                          -- BHT record
     hit         : std_ulogic;                                                         -- fetched pc hit BTB (don't used)
     unaligned   : std_ulogic_vector(2 downto 0);                                      -- unaligned compressed instruction flag due to previous fetched pair
+
+    
+   de_rvc_aligned         : iword_pair_type;
+   de_rvc_comp_ill        : std_logic_vector(1 downto 0);
+   de_rvc_hold            : std_ulogic;
+   de_rvc_npc             : word3;
+   de_rvc_valid           : fetch_pair;
+   de_rvc_buffer_first    : std_ulogic;
+   de_rvc_buffer_sec      : std_ulogic;
+   de_rvc_buffer_third    : std_ulogic;
+   de_rvc_buffer_inst     : iword_type;
+   de_rvc_buffer_comp_ill : std_ulogic;
+
+  debug_flag  : std_ulogic;
 --    uninst      : iword16_type;                                                     -- unaligned compressed instruction
   end record;
 
-  function decode_has_error(decode : decode_reg_type) return boolean is
+  function decode_has_error(decode : decode_reg_type; de_rvc_valid: fetch_pair; de_rvc_hold : std_ulogic) return boolean is
   begin
-    -- return hamming_has_error(decode.pc) or icdtype_has_error(decode.inst);
-      -- return hamming_has_error(decode.pc) or 
-      --   icdtype_has_error(decode.inst) or
-      --   iqueue_has_error(decode.buff) or 
-      --   tmr_has_error(decode.valid(0), decode.valid(1), decode.valid(2)) or
-      --   way_has_error(decode.way) or tmr_has_error(decode.mexc(0), decode.mexc(1), decode.mexc(2)) or
-      --   tmr_has_error(decode.was_xc(0), decode.was_xc(1), decode.was_xc(2)) or tmr_has_error(decode.exctype(0), decode.exctype(1), decode.exctype(2)) or
-      --   tmr_has_error(decode.exchyper(0), decode.exchyper(1), decode.exchyper(2)) or hamming_has_error(decode.tval2) or
-      --   hamming_has_error(decode.tval2type) or prediction_array_has_error(decode.prediction) or
-      --   tmr_has_error(decode.unaligned(0), decode.unaligned(1), decode.unaligned(2));
-
-      
-      return hamming_has_error(decode.pc) or tmr_has_error(decode.valid(0), decode.valid(1), decode.valid(2)) or tmr_has_error(decode.mexc(0), decode.mexc(1), decode.mexc(2)) or tmr_has_error(decode.was_xc(0), decode.was_xc(1), decode.was_xc(2)) or tmr_has_error(decode.unaligned(0), decode.unaligned(1), decode.unaligned(2));
-      
-      -- return hamming_has_error(decode.pc);
+      return hamming_has_error(decode.pc) or 
+              (hamming_has_error(decode.inst(0)) and de_rvc_valid /= "00" and de_rvc_hold = '0') or
+              (hamming_has_error(decode.inst(1)) and de_rvc_valid /= "00" and de_rvc_hold = '0') or
+              tmr_has_error(decode.valid(0), decode.valid(1), decode.valid(2)) or 
+              tmr_has_error(decode.mexc(0), decode.mexc(1), decode.mexc(2)) or 
+              tmr_has_error(decode.was_xc(0), decode.was_xc(1), decode.was_xc(2)) or 
+              tmr_has_error(decode.unaligned(0), decode.unaligned(1), decode.unaligned(2));
   end;
 
   -- Decode Stage <-> Register Access Stage -----------------------------------
@@ -6255,8 +6261,7 @@ architecture rtl of iunv is
                                 accesshold : inout std_logic_vector;
                                 exechold   : inout std_logic_vector;
                                 fpuhold    : inout std_logic_vector;
-                                holdi      : out   std_ulogic;
-                                iu_fault   : out   stage_fault
+                                holdi      : out   std_ulogic
                                 ) is
     -- Non-constant
     variable hold      : std_ulogic    := '0';
@@ -6841,25 +6846,38 @@ architecture rtl of iunv is
       lbranch   := '0';
     end if;
 
+    holdi       := hold;
+    lbrancho    := lbranch and not(r.csr.dfeaturesen.lbranch_dis);
+    laluo       := lcsr or (lalu and (lalu'range => not(r.csr.dfeaturesen.lalu_dis)));
+  end;
+
+  
+  -- Multiplication Unit Signals Generation
+  procedure fault_ctrl(
+    r           : in    registers;
+    de_rvc_valid: in fetch_pair;
+    de_rvc_hold : in std_ulogic;
+    holdi       : out   std_ulogic;
+    iu_fault    : out   stage_fault
+  ) is
+
+    variable hold      : std_ulogic;
+    variable faults    : stage_fault   := (others => FALSE);
+  begin
     -- Faults detection 
     if fault_protection = 1 then
       if hamming_has_error(r.f.pc) or r.f.valid(0) /= r.f.valid(1) or r.f.valid(0) /= r.f.valid(2) or r.f.valid(1) /= r.f.valid(2) then
         faults.f := TRUE;
         hold := '1';
       end if;
-      if decode_has_error(r.d) then
+      if decode_has_error(r.d, de_rvc_valid, de_rvc_hold) then
         faults.d := TRUE;
         hold := '1';
       end if;
 
     end if;
-    
-
-
     iu_fault    := faults;
     holdi       := hold;
-    lbrancho    := lbranch and not(r.csr.dfeaturesen.lbranch_dis);
-    laluo       := lcsr or (lalu and (lalu'range => not(r.csr.dfeaturesen.lalu_dis)));
   end;
 
   -- Multiplication Unit Signals Generation
@@ -7982,6 +8000,8 @@ begin
 
     -- Instruction Control
     variable ic_hold_issue      : std_ulogic;
+    variable inst_hold          : std_ulogic;
+    variable hold_fault         : std_ulogic;
     variable ic_lbranch         : std_ulogic;
     variable ic_lalu            : fetch_pair;
     variable ic_fault           : stage_fault;
@@ -9850,10 +9870,18 @@ begin
                         v.e.accesshold, -- out : Memory access hold due to CSR changes.
                         v.e.exechold,   -- out : Execution hold due to pipeline flushing instruction.
                         v.e.fpuhold,    -- out : Execution hold due to FPU instructions.
-                        ic_hold_issue,  -- out : Hold Issue Signal
-                        ic_fault
+                        inst_hold   -- out : Hold Issue Signal
                         );
 
+    fault_ctrl          (
+                          r,
+                          de_rvc_valid,
+                          de_rvc_hold,
+                          hold_fault,
+                          ic_fault
+                        );
+    
+    ic_hold_issue := inst_hold or hold_fault;
     -- To the ALUs --------------------------------------------------------
     for i in lanes'range loop
       v.e.alu(i).op1    := ra_alu_op1(i);
@@ -9909,6 +9937,17 @@ begin
                 de_rvc_buffer_comp_ill,       -- out : Buffer comp is illegal
                 v.d.unaligned                 -- out : Unaligned
                 );
+    v.d.de_rvc_aligned := de_rvc_aligned;
+    v.d.de_rvc_comp_ill := de_rvc_comp_ill;
+    v.d.de_rvc_hold := de_rvc_hold;
+    v.d.de_rvc_npc := de_rvc_npc;
+    v.d.de_rvc_valid := de_rvc_valid;
+    v.d.de_rvc_buffer_first := de_rvc_buffer_first;
+    v.d.de_rvc_buffer_sec := de_rvc_buffer_sec;
+    v.d.de_rvc_buffer_third := de_rvc_buffer_third;
+    v.d.de_rvc_buffer_inst := de_rvc_buffer_inst;
+    v.d.de_rvc_buffer_comp_ill := de_rvc_buffer_comp_ill;
+    v.d.debug_flag := hold_fault;
 
     for i in fetch'range loop
       if de_rvc_valid(i) = '0' or de_rvc_aligned(i).c = '0' then
@@ -11330,9 +11369,9 @@ begin
         v.d.cause     := r.d.cause;
         v.d.inst      := r.d.inst;
 
-        -- for i in r.d.inst'range loop
-        --   v.d.inst(i) := hamming_encode(hamming_decode(v.d.inst(i)));
-        -- end loop;
+        for i in r.d.inst'range loop
+          v.d.inst(i) := hamming_encode(hamming_decode(v.d.inst(i)));
+        end loop;
 
         v.d.way       := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(r.d.way(0)), std_ulogic_vector(r.d.way(1)), std_ulogic_vector(r.d.way(2)))));
         v.d.mexc      := (others => tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)));
