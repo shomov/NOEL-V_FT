@@ -11349,6 +11349,7 @@ begin
     s_tval2type := word2(get_data(v.d.tval2type));
     s_fpu_wait  := v.e.fpu_wait;
 
+
     -- Bubble after A stage if instruction control says so.
     if ic_hold_issue = '1' and ra_flush = '0' then
       -- Stall stages
@@ -11373,32 +11374,8 @@ begin
         for i in r.d.inst'range loop
           v.d.inst(i) := hamming_encode(hamming_decode(v.d.inst(i)));
         end loop;
-
-          
-  -- type iqueue_type_ecc is record
-  --       pc              : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);            -- program counter
-  --       inst            : iword_type_ecc;                 -- instruction
-  --       cinst           : ecc_vector(WORD16_ECC_RANGE.left downto WORD16_ECC_RANGE.right);           -- compressed instruction
-  --       valid           : std_ulogic_vector(2 downto 0);  -- instruction buffer entry is valid
-  --       comp            : std_ulogic_vector(2 downto 0);  -- instruction buffer entry is compressed
-  --       xc              : std_ulogic_vector(2 downto 0);  -- instruction buffer entry has generated a trap in previous stages
-  --       bjump           : std_ulogic_vector(2 downto 0);  -- 1-> branch or jump inst
-  --       bjump_predicted : std_ulogic_vector(2 downto 0);  -- 1-> bjump already predicted before buffering
-  --       prediction      : prediction_type_ecc;            -- prediction as from the BHT
-  --       comp_ill        : std_ulogic_vector(2 downto 0);  -- compressed instruction is invalid
-  --     end record;
-
-        v.d.buff.pc               := hamming_encode(hamming_decode(r.d.buff.pc));
-
-        v.d.buff.cinst            := hamming_encode(hamming_decode(r.d.buff.cinst));
-        v.d.buff.valid            := (others => tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)));
-        v.d.buff.comp             := (others => tmr_voter(r.d.buff.comp(0), r.d.buff.comp(1), r.d.buff.comp(2)));
-        v.d.buff.xc               := (others => tmr_voter(r.d.buff.xc(0), r.d.buff.xc(1), r.d.buff.xc(2)));
-        v.d.buff.bjump            := (others => tmr_voter(r.d.buff.bjump(0), r.d.buff.bjump(1), r.d.buff.bjump(2)));
-        v.d.buff.bjump_predicted  := (others => tmr_voter(r.d.buff.bjump_predicted(0), r.d.buff.bjump_predicted(1), r.d.buff.bjump_predicted(2)));
-        -- v.d.buff.prediction       := hamming_encode(hamming_decode(r.d.buff.prediction));
-        v.d.buff.comp_ill         := (others => tmr_voter(r.d.buff.comp_ill(0), r.d.buff.comp_ill(1), r.d.buff.comp_ill(2)));
-
+        
+        v.d.buff := iqueue_fix_error(r.d.buff);
 
         v.d.way       := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(r.d.way(0)), std_ulogic_vector(r.d.way(1)), std_ulogic_vector(r.d.way(2)))));
         v.d.mexc      := (others => tmr_voter(r.d.mexc(0), r.d.mexc(1), r.d.mexc(2)));

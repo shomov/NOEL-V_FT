@@ -128,10 +128,10 @@ package nvsupport is
   end record;
 
 
-  constant LPC_ECC_RANGE   : ecc_range := hamming_indices(2);
-  constant WORD_ECC_RANGE  : ecc_range := hamming_indices(word'length);
-  constant WORD16_ECC_RANGE  : ecc_range := hamming_indices(word16'length);
-  constant WORD3_ECC_RANGE  : ecc_range := hamming_indices(word3'length);
+  constant LPC_ECC_RANGE      : ecc_range := hamming_indices(2);
+  constant WORD_ECC_RANGE     : ecc_range := hamming_indices(word'length);
+  constant WORD16_ECC_RANGE   : ecc_range := hamming_indices(word16'length);
+  constant WORD3_ECC_RANGE    : ecc_range := hamming_indices(word3'length);
 
   type iword_type_ecc is record
     lpc : ecc_vector(LPC_ECC_RANGE.left downto LPC_ECC_RANGE.right);
@@ -144,6 +144,8 @@ package nvsupport is
   
   function to_iword_type(ecc : iword_type_ecc) return iword_type;
   function to_iword_type_ecc(start : iword_type) return iword_type_ecc;
+  function iword_has_error(ecc : iword_type_ecc) return boolean;
+  function iword_fix_error(iword : iword_type_ecc) return iword_type_ecc;
 
   
   constant iword_type_ecc_none : iword_type_ecc := (
@@ -228,6 +230,7 @@ package nvsupport is
   function to_iqueue_type(ecc : iqueue_type_ecc) return iqueue_type;
   function to_iqueue_type_ecc(start : iqueue_type) return iqueue_type_ecc;
   function iqueue_has_error(iqueue : iqueue_type_ecc) return boolean;
+  function iqueue_fix_error(iqueue : iqueue_type_ecc) return iqueue_type_ecc;
 
   constant iqueue_none : iqueue_type := (
 --qqq    pc              => PC_RESET,
@@ -8028,7 +8031,7 @@ package body nvsupport is
     res.d   := word(get_data(ecc.d));
     res.dc  := word16(get_data(ecc.dc));
     res.xc  := word3(get_data(ecc.xc));
-    res.c   := tmr_voter(ecc.c(0), ecc.c(1), ecc.c(2));
+    res.c   := ecc.c(0);
     return res;
   end;
 
@@ -8052,12 +8055,22 @@ package body nvsupport is
       tmr_has_error(ecc.c(0), ecc.c(1), ecc.c(2));
   end;
 
--- TODO: remove tmr_voter()
+  function iword_fix_error(iword : iword_type_ecc) return iword_type_ecc is
+    variable res : iword_type_ecc;
+  begin
+    res.lpc := hamming_encode(hamming_decode(iword.lpc));
+    res.d   := hamming_encode(hamming_decode(iword.d));
+    res.dc  := hamming_encode(hamming_decode(iword.dc));
+    res.xc  := hamming_encode(hamming_decode(iword.xc));
+    res.c   := (others => tmr_voter(iword.c(0), iword.c(1), iword.c(2)));
+    return res;
+  end;
+
   function to_prediction_type(ecc : prediction_type_ecc) return prediction_type is
     variable res     : prediction_type;
   begin
-    res.taken := tmr_voter(ecc.taken(0), ecc.taken(1), ecc.taken(2));
-    res.hit   := tmr_voter(ecc.hit(0), ecc.hit(1), ecc.hit(2));
+    res.taken := ecc.taken(0);
+    res.hit   := ecc.hit(0);
     return res;
   end;
 
@@ -8099,13 +8112,13 @@ package body nvsupport is
     res.pc              := std_logic_vector(get_data(ecc.pc));
     res.inst            := to_iword_type(ecc.inst);
     res.cinst           := std_logic_vector(get_data(ecc.cinst));
-    res.valid           := tmr_voter(ecc.valid(0), ecc.valid(1), ecc.valid(2));
-    res.comp            := tmr_voter(ecc.comp(0), ecc.comp(1), ecc.comp(2));
-    res.xc              := tmr_voter(ecc.xc(0), ecc.xc(1), ecc.xc(2));
-    res.bjump           := tmr_voter(ecc.bjump(0), ecc.bjump(1), ecc.bjump(2));
-    res.bjump_predicted := tmr_voter(ecc.bjump_predicted(0), ecc.bjump_predicted(1), ecc.bjump_predicted(2));
+    res.valid           := ecc.valid(0);
+    res.comp            := ecc.comp(0);
+    res.xc              := ecc.xc(0);
+    res.bjump           := ecc.bjump(0);
+    res.bjump_predicted := ecc.bjump_predicted(0);
     res.prediction      := to_prediction_type(ecc.prediction);
-    res.comp_ill        := tmr_voter(ecc.comp_ill(0), ecc.comp_ill(1), ecc.comp_ill(2));
+    res.comp_ill        := ecc.comp_ill(0);
     return res;
   end;
 
@@ -8135,6 +8148,26 @@ package body nvsupport is
       prediction_has_error(iqueue.prediction) or tmr_has_error(iqueue.comp_ill(0), iqueue.comp_ill(1), iqueue.comp_ill(2));
     
     return false;
+  end;
+  
+  function iqueue_fix_error(iqueue : iqueue_type_ecc) return iqueue_type_ecc is
+    variable res : iqueue_type_ecc;
+  begin
+    res.pc               := hamming_encode(hamming_decode(iqueue.pc));
+
+    res.inst             := iword_fix_error(iqueue.inst);
+
+    res.cinst            := hamming_encode(hamming_decode(iqueue.cinst));
+    res.valid            := (others => tmr_voter(iqueue.valid(0), iqueue.valid(1), iqueue.valid(2)));
+    res.comp             := (others => tmr_voter(iqueue.comp(0), iqueue.comp(1), iqueue.comp(2)));
+    res.xc               := (others => tmr_voter(iqueue.xc(0), iqueue.xc(1), iqueue.xc(2)));
+    res.bjump            := (others => tmr_voter(iqueue.bjump(0), iqueue.bjump(1), iqueue.bjump(2)));
+    res.bjump_predicted  := (others => tmr_voter(iqueue.bjump_predicted(0), iqueue.bjump_predicted(1), iqueue.bjump_predicted(2)));
+    res.prediction.taken := (others => tmr_voter(iqueue.prediction.taken(0), iqueue.prediction.taken(1), iqueue.prediction.taken(2)));
+    res.prediction.hit   := (others => tmr_voter(iqueue.prediction.hit(0), iqueue.prediction.hit(1), iqueue.prediction.hit(2)));
+    res.comp_ill         := (others => tmr_voter(iqueue.comp_ill(0), iqueue.comp_ill(1), iqueue.comp_ill(2)));
+
+    return res;
   end;
 
 
