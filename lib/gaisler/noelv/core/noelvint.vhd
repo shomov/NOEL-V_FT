@@ -45,6 +45,8 @@ use gaisler.noelv.nv_debug_in_vector;
 use gaisler.noelv.nv_debug_out_vector;
 use gaisler.noelv.nv_counter_out_type;
 use gaisler.noelv.nv_etrace_out_type;
+library extras;
+use extras.hamming_edac.all;
 
 package noelvint is
 
@@ -54,11 +56,24 @@ package noelvint is
 
   subtype cause_type is std_logic_vector(5 downto 0);
 
+  constant CAUSE_ECC_RANGE  : ecc_range := hamming_indices(cause_type'length);
+  subtype cause_type_ecc is ecc_vector(CAUSE_ECC_RANGE.left downto CAUSE_ECC_RANGE.right);
+
+  subtype word2  is std_logic_vector( 1 downto 0);
   subtype word8  is std_logic_vector( 7 downto 0);
   subtype word16 is std_logic_vector(15 downto 0);
   subtype word64 is std_logic_vector(63 downto 0);
   subtype word   is std_logic_vector(31 downto 0);
   subtype wordx  is std_logic_vector(XLEN - 1 downto 0);
+  
+  -- ECC constants -----------------------------------------------------------
+  -- constant ICDTYPE_ECC_RANGE  : ecc_range := hamming_indices(icdtype'length);
+  constant WORD64_ECC_RANGE  : ecc_range := hamming_indices(word64'length);
+  constant WORD16_ECC_RANGE  : ecc_range := hamming_indices(word16'length);
+  constant WORDX_ECC_RANGE  : ecc_range := hamming_indices(wordx'length);
+  constant WORD2_ECC_RANGE  : ecc_range := hamming_indices(word2'length);
+  constant WORD_ECC_RANGE  : ecc_range := hamming_indices(word'length);
+
 
   constant zerow16      : word16 := (others => '0');
   constant zerow64      : word64 := (others => '0');
@@ -692,9 +707,21 @@ package noelvint is
     flush       : std_ulogic;
   end record;
 
+  type nv_ras_in_type_ecc is record
+    push        : std_ulogic_vector(2 downto 0);
+    pop         : std_ulogic_vector(2 downto 0);
+    wdata       : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);
+    flush       : std_ulogic_vector(2 downto 0);
+  end record;
+
   type nv_ras_out_type is record
     rdata       : wordx;
     hit         : std_ulogic;
+  end record;
+
+  type nv_ras_out_type_ecc is record
+    rdata       : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);
+    hit         : std_ulogic_vector(2 downto 0);
   end record;
 
   constant nv_ras_out_none : nv_ras_out_type := (
@@ -702,11 +729,23 @@ package noelvint is
     hit         => '0'
   );
 
+  constant nv_ras_out_none_ecc : nv_ras_out_type_ecc := (
+    rdata       => (others => '0'),
+    hit         => (others => '0')
+  );
+
   constant nv_ras_in_none : nv_ras_in_type := (
     push        => '0',
     pop         => '0',
     wdata       => zerox,
     flush       => '0'
+  );
+
+  constant nv_ras_in_none_ecc : nv_ras_in_type_ecc := (
+    push        => (others => '0'),
+    pop         => (others => '0'),
+    wdata       => (others => '0'),
+    flush       => (others => '0')
   );
 
   -- Branch Target Buffer -----------------------------------------------------

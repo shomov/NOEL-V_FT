@@ -74,9 +74,13 @@ use gaisler.noelvint.nv_bht_out_type;
 use gaisler.noelvint.nv_btb_in_type;
 use gaisler.noelvint.nv_btb_out_type;
 use gaisler.noelvint.nv_ras_in_type;
+use gaisler.noelvint.nv_ras_in_type_ecc;
 use gaisler.noelvint.nv_ras_in_none;
+use gaisler.noelvint.nv_ras_in_none_ecc;
 use gaisler.noelvint.nv_ras_out_type;
+use gaisler.noelvint.nv_ras_out_type_ecc;
 use gaisler.noelvint.nv_ras_out_none;
+use gaisler.noelvint.nv_ras_out_none_ecc;
 use gaisler.noelvint.nv_dcache_in_type;
 use gaisler.noelvint.nv_dcache_out_type;
 use gaisler.noelvint.iregfile_in_type;
@@ -101,6 +105,9 @@ use gaisler.noelvint.TRACE_WIDTH;
 use gaisler.noelvint.trace_info;
 use gaisler.noelvint.trace_rst;
 use gaisler.noelvint.cause_type;
+use gaisler.noelvint.cause_type_ecc;
+use gaisler.noelvint.WORD2_ECC_RANGE;
+use gaisler.noelvint.WORD64_ECC_RANGE;
 use gaisler.noelvint.pmpaddrzero;
 use gaisler.noelvint.PMPPRECALCRES;
 use gaisler.noelvint.fpu_id;
@@ -551,15 +558,23 @@ architecture rtl of iunv is
   -- but calculations need full 64 bits (or at least check for bad address).
 --  subtype pctype         is std_logic_vector(pcbits - 1 downto 0);
   subtype pctype         is addr_type;
+  
+  constant PCTYPE_ECC_RANGE   : ecc_range := hamming_indices(pctype'length);
 
   subtype lanes_range    is integer range lanes'range;
+  
   subtype lanes_type     is std_logic_vector(lanes'high downto lanes'low);  -- Must be n downto 0!
+
+  constant LANES_ECC_RANGE  : ecc_range := hamming_indices(lanes'length);  -- !
+  subtype lanes_type_ecc     is ecc_vector(LANES_ECC_RANGE.left downto LANES_ECC_RANGE.right);  -- Must be n downto 0!
 
   -- Lanes types
   type pc_lanes_type     is array (lanes'range) of pctype;
   type rfa_lanes_type    is array (lanes'range) of rfatype;
+  type rfa_lanes_type_ecc    is array (lanes'range) of rfatype_ecc;
   type word_lanes_type   is array (lanes'range) of word;
   type wordx_lanes_type  is array (lanes'range) of wordx;
+  type wordx_lanes_type_ecc  is array (lanes'range) of ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);
   type word16_lanes_type is array (lanes'range) of word16;
   type word2_lanes_type  is array (lanes'range) of word2;
   type word3_lanes_type  is array (lanes'range) of word3;
@@ -568,6 +583,25 @@ architecture rtl of iunv is
   type mux_lanes_type    is array (lanes'range) of word3;
   type cause_lanes_type  is array (lanes'range) of cause_type;
   type alu_ctrl_lanes_type is array (lanes'range) of alu_ctrl;
+
+  function to_rfatype(rfa : rfatype_ecc) return rfatype is
+  begin
+    return std_logic_vector(get_data(rfa));
+  end;
+
+  function to_rfatype_ecc(rfa : rfatype) return rfatype_ecc is
+  begin
+    return hamming_encode(std_ulogic_vector(rfa));
+  end;
+
+  function to_rfa_lanes_type(rfa : rfa_lanes_type_ecc) return rfa_lanes_type is
+    variable res : rfa_lanes_type;
+  begin
+    for i in lanes'range loop
+      res(i) := std_logic_vector(get_data(rfa(i)));
+    end loop;
+    return res;
+  end;
 
 --  type iword16_type is record
 --    lpc : std_logic_vector(1 downto 0);
@@ -609,6 +643,45 @@ architecture rtl of iunv is
     mpred       : std_ulogic;                          -- branch mispredicted
   end record;
 
+
+  constant DIR_ECC_RANGE  : ecc_range := hamming_indices(bhti.wdata'length);
+
+  type branch_type_ecc is record
+    valid       : std_ulogic_vector(2 downto 0);                          -- instruction is a branch instruction
+    dir         : ecc_vector(DIR_ECC_RANGE.left downto DIR_ECC_RANGE.right);  -- branch output prediction from the BHT
+    addr        : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);                              -- target address where to branch
+    naddr       : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);                              -- address of the next instruction
+    taken       : std_ulogic_vector(2 downto 0);                          -- branch has been taken
+    hit         : std_ulogic_vector(2 downto 0);                          -- branch target address has been found in the BTB
+    mpred       : std_ulogic_vector(2 downto 0);                          -- branch mispredicted
+  end record;
+
+  function to_branch_type(branch : branch_type_ecc) return branch_type is
+    variable res : branch_type;
+  begin
+    res.valid  := branch.valid(0);
+    res.dir    := std_logic_vector(get_data(branch.dir));
+    res.addr   := std_logic_vector(get_data(branch.addr));
+    res.naddr  := std_logic_vector(get_data(branch.naddr));
+    res.taken  := branch.taken(0);
+    res.hit    := branch.hit(0);
+    res.mpred  := branch.mpred(0);
+    return res;
+  end;
+
+  function to_branch_type_ecc(branch : branch_type) return branch_type_ecc is
+    variable res : branch_type_ecc;
+  begin
+    res.valid  := (others => branch.valid);
+    res.dir    := hamming_encode(std_ulogic_vector(branch.dir));
+    res.addr   := hamming_encode(std_ulogic_vector(branch.addr));
+    res.naddr  := hamming_encode(std_ulogic_vector(branch.naddr));
+    res.taken  := (others => branch.taken);
+    res.hit    := (others => branch.hit);
+    res.mpred  := (others => branch.mpred);
+    return res;
+  end;
+
   type branch_pair_type is array (lanes'range) of branch_type;
 
   constant branch_none : branch_type := (
@@ -621,14 +694,52 @@ architecture rtl of iunv is
     mpred       => '0'
     );
 
+    constant branch_none_ecc : branch_type_ecc := (
+      valid       => (others => '0'),
+      dir         => (others => '0'),
+      addr        => (others => '0'),
+      naddr       => (others => '0'),
+      taken       => (others => '0'),
+      hit         => (others => '0'),
+      mpred       => (others => '0')
+      );
+
   -- Forwarding type --------------------------------------------------------
   type rd_src_type is array (stage_type'pos(a) to stage_type'pos(wb)) of lanes_type;
+  type rd_src_type_ecc is array (stage_type'pos(a) to stage_type'pos(wb)) of lanes_type_ecc;
   type rd_vs_rs_type is record
     rfa1        : rd_src_type;
     rfa2        : rd_src_type;
   end record;
+  
+  type rd_vs_rs_type_ecc is record
+    rfa1        : rd_src_type_ecc;
+    rfa2        : rd_src_type_ecc;
+  end record;
+
+  function to_rd_vs_rs_type(rd_vs_rv : rd_vs_rs_type_ecc) return rd_vs_rs_type is
+    variable res : rd_vs_rs_type;
+  begin
+    for i in rd_src_type'range loop
+      res.rfa1(i) := std_logic_vector(get_data(rd_vs_rv.rfa1(i)));
+      res.rfa2(i) := std_logic_vector(get_data(rd_vs_rv.rfa2(i)));
+    end loop;
+    return res;
+  end;
+
+  function to_rd_vs_rs_type_ecc(rd_vs_rv : rd_vs_rs_type) return rd_vs_rs_type_ecc is
+    variable res : rd_vs_rs_type_ecc;
+  begin
+    for i in rd_src_type_ecc'range loop
+      res.rfa1(i) := hamming_encode(std_ulogic_vector(rd_vs_rv.rfa1(i)));
+      res.rfa2(i) := hamming_encode(std_ulogic_vector(rd_vs_rv.rfa2(i)));
+    end loop;
+    return res;
+  end;
 
   constant rd_vs_rs_none : rd_vs_rs_type := ((others => (others => '0')),
+                                             (others => (others => '0')));
+  constant rd_vs_rs_none_ecc : rd_vs_rs_type_ecc := ((others => (others => '0')),
                                              (others => (others => '0')));
 
   subtype rs_type is integer range 1 to 2;
@@ -659,6 +770,26 @@ architecture rtl of iunv is
     fpu         : fpu_id;                       -- FPU issue ID
     fpu_flush   : std_ulogic;                   -- FPU instruction has been flushed
   end record;
+  
+  type pipeline_ctrl_type_ecc is record
+    pc          : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);                       -- program counter
+    inst        : ecc_vector(WORD_ECC_RANGE.left downto WORD_ECC_RANGE.right);                         -- instruction
+    cinst       : ecc_vector(WORD16_ECC_RANGE.left downto WORD16_ECC_RANGE.right);                       -- compressed instruction
+    valid       : std_ulogic_vector(2 downto 0);                   -- instruction is valid
+    comp        : std_ulogic_vector(2 downto 0);                   -- instruction is compressed
+    branch      : branch_type_ecc;                  -- branch record
+    rdv         : std_ulogic_vector(2 downto 0);                   -- destination register is valid
+    rd_vs_rs    : rd_vs_rs_type_ecc;                -- pre-checked forwarding
+    csrv        : std_ulogic_vector(2 downto 0);                   -- instruction is a CSR one
+    csrdo       : std_ulogic_vector(2 downto 0);                   -- read only CSR
+    xc          : std_ulogic_vector(2 downto 0);                   -- exception/trap
+    mexc        : std_ulogic_vector(2 downto 0);                   -- inst memory excp
+    cause       : cause_type_ecc;                   -- exception/trap cause
+    tval        : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);                        -- exception/trap value
+    fusel       : fuseltype_ecc;                    -- assigned functional unit
+    fpu         : fpu_id;                       -- FPU issue ID
+    fpu_flush   : std_ulogic;                   -- FPU instruction has been flushed
+  end record;
 
   constant pipeline_ctrl_none   : pipeline_ctrl_type := (
     pc          => PC_RESET,
@@ -680,6 +811,26 @@ architecture rtl of iunv is
     fpu_flush   => '0'
     );
 
+    constant pipeline_ctrl_none_ecc   : pipeline_ctrl_type_ecc := (
+      pc          => (others => '0'),
+      inst        => (others => '0'),
+      cinst       => (others => '0'),
+      valid       => (others => '0'),
+      comp        => (others => '0'),
+      branch      => branch_none_ecc,
+      rdv         => (others => '0'),
+      rd_vs_rs    => rd_vs_rs_none_ecc,
+      csrv        => (others => '0'),
+      csrdo       => (others => '0'),
+      xc          => (others => '0'),
+      mexc        => (others => '0'),
+      cause       => (others => '0'),
+      tval        => (others => '0'),
+      fusel       => (others => '0'),
+      fpu         => (others => '0'),
+      fpu_flush   => '0'
+      );
+
   -- Note that this does not contain a valid flag.
   -- That needs to be fetched from .ctrl(csr_lane).valid,
   -- since pipeline flush etc depends on it.
@@ -691,6 +842,27 @@ architecture rtl of iunv is
     v        : wordx;         -- Value read from CSR register
   end record;
 
+  constant CATEGORY_ECC_RANGE  : ecc_range := hamming_indices(10);
+
+  type csr_type_ecc is record
+    r        : std_ulogic_vector(2 downto 0);
+    w        : std_ulogic_vector(2 downto 0);
+    category : ecc_vector(CATEGORY_ECC_RANGE.left downto CATEGORY_ECC_RANGE.right);
+    ctrl     : ecc_vector(WORD2_ECC_RANGE.left downto WORD2_ECC_RANGE.right);
+    v        : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);         -- Value read from CSR register
+  end record;
+  
+  function to_csr_type(csr : csr_type_ecc) return csr_type is
+    variable res : csr_type;
+  begin
+    res.r        := csr.r(0);
+    res.w        := csr.w(0);
+    res.category := std_logic_vector(get_data(csr.category));
+    res.ctrl     := word2(get_data(csr.ctrl));
+    res.v        := wordx(get_data(csr.v));
+    return res;
+  end;
+
   constant csr_none : csr_type := (
     r        => '0',
     w        => '0',
@@ -699,15 +871,85 @@ architecture rtl of iunv is
     v        => (others => '0')
   );
 
-  type pipeline_ctrl_lanes_type is array (lanes'range) of pipeline_ctrl_type;
-  
-  -- ECC constants -----------------------------------------------------------
-  constant PCTYPE_ECC_RANGE   : ecc_range := hamming_indices(pctype'length);
-  constant ICDTYPE_ECC_RANGE  : ecc_range := hamming_indices(icdtype'length);
-  constant WORD64_ECC_RANGE  : ecc_range := hamming_indices(word64'length);
-  constant WORDX_ECC_RANGE  : ecc_range := hamming_indices(wordx'length);
-  constant WORD2_ECC_RANGE  : ecc_range := hamming_indices(word2'length);
+  constant csr_none_ecc : csr_type_ecc := (
+    r        => (others => '0'),
+    w        => (others => '0'),
+    category => (others => '0'),
+    ctrl     => (others => '0'),
+    v        => (others => '0')
+  );
 
+  type pipeline_ctrl_lanes_type is array (lanes'range) of pipeline_ctrl_type;
+  type pipeline_ctrl_lanes_type_ecc is array (lanes'range) of pipeline_ctrl_type_ecc;
+
+  
+  function to_pipeline_ctrl_lanes_type_ecc(pipe : pipeline_ctrl_lanes_type) return pipeline_ctrl_lanes_type_ecc is
+    variable res : pipeline_ctrl_lanes_type_ecc;
+  begin
+    for i in lanes'range loop
+      res(i).pc         := hamming_encode(std_ulogic_vector(pipe(i).pc));      -- program counter
+      res(i).inst       := hamming_encode(std_ulogic_vector(pipe(i).inst));    -- instruction
+      res(i).cinst      := hamming_encode(std_ulogic_vector(pipe(i).cinst));   -- compressed instruction
+      res(i).valid      := (others => pipe(i).valid);       -- instruction is valid
+      res(i).comp       := (others => pipe(i).comp);        -- instruction is compressed
+      res(i).branch     := to_branch_type_ecc(pipe(i).branch);  -- branch record
+      res(i).rdv        := (others => pipe(i).rdv);         -- destination register is valid
+      res(i).rd_vs_rs   := to_rd_vs_rs_type_ecc(pipe(i).rd_vs_rs);-- pre-checked forwarding
+      res(i).csrv       := (others => pipe(i).csrv);        -- instruction is a CSR one
+      res(i).csrdo      := (others => pipe(i).csrdo);       -- read only CSR
+      res(i).xc         := (others => pipe(i).xc);          -- exception/trap
+      res(i).mexc       := (others => pipe(i).mexc);        -- inst memory excp
+      res(i).cause      := hamming_encode(std_ulogic_vector(pipe(i).cause));   -- exception/trap cause
+      res(i).tval       := hamming_encode(std_ulogic_vector(pipe(i).tval));  -- exception/trap value
+      res(i).fusel      := hamming_encode(std_ulogic_vector(pipe(i).fusel));   -- assigned functional unit
+      res(i).fpu        := pipe(i).fpu;                  -- FPU issue ID
+      res(i).fpu_flush  := pipe(i).fpu_flush;               -- FPU instruction has been flushed
+    end loop;
+    return res;
+  end;
+  
+  function to_pipeline_ctrl_lanes_type(pipe : pipeline_ctrl_lanes_type_ecc) return pipeline_ctrl_lanes_type is
+    variable res : pipeline_ctrl_lanes_type;
+  begin
+    for i in lanes'range loop
+      res(i).pc         := std_logic_vector(get_data(pipe(i).pc));      -- program counter
+      res(i).inst       := std_logic_vector(get_data(pipe(i).inst));    -- instruction
+      res(i).cinst      := std_logic_vector(get_data(pipe(i).cinst));   -- compressed instruction
+      res(i).valid      := pipe(i).valid(0);       -- instruction is valid
+      res(i).comp       := pipe(i).comp(0);        -- instruction is compressed
+      res(i).branch     := to_branch_type(pipe(i).branch);  -- branch record
+      res(i).rdv        := pipe(i).rdv(0);         -- destination register is valid
+      res(i).rd_vs_rs   := to_rd_vs_rs_type(pipe(i).rd_vs_rs);-- pre-checked forwarding
+      res(i).csrv       := pipe(i).csrv(0);        -- instruction is a CSR one
+      res(i).csrdo      := pipe(i).csrdo(0);       -- read only CSR
+      res(i).xc         := pipe(i).xc(0);          -- exception/trap
+      res(i).mexc       := pipe(i).mexc(0);        -- inst memory excp
+      res(i).cause      := std_logic_vector(get_data(pipe(i).cause));   -- exception/trap cause
+      res(i).tval       := std_logic_vector(get_data(pipe(i).tval));  -- exception/trap value
+      res(i).fusel      := std_logic_vector(get_data(pipe(i).fusel));   -- assigned functional unit
+      res(i).fpu        := pipe(i).fpu;                  -- FPU issue ID
+      res(i).fpu_flush  := pipe(i).fpu_flush;               -- FPU instruction has been flushed
+    end loop;
+    return res;
+  end;
+
+  function to_nv_ras_in_type(ras_ecc : nv_ras_in_type_ecc) return nv_ras_in_type is
+    variable res : nv_ras_in_type;
+  begin
+    res.push    := ras_ecc.push(0);
+    res.pop     := ras_ecc.pop(0);
+    res.wdata   := wordx(get_data(ras_ecc.wdata));
+    res.flush   := ras_ecc.flush(0);
+    return res;
+  end;
+
+  function to_nv_ras_out_type(ras_ecc : nv_ras_out_type_ecc) return nv_ras_out_type is
+    variable res : nv_ras_out_type;
+  begin
+    res.rdata   := wordx(get_data(ras_ecc.rdata));
+    res.hit   := ras_ecc.hit(0);
+    return res;
+  end;
 
   type icdtype_ecc       is array (0 to iways - 1) of ecc_vector(WORD64_ECC_RANGE.left downto WORD64_ECC_RANGE.right);
 
@@ -757,22 +999,9 @@ architecture rtl of iunv is
     tval2       : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);      -- Hypervisor exception info from cache
     tval2type   : ecc_vector(WORD2_ECC_RANGE.left downto WORD2_ECC_RANGE.right);      -- Hypervisor exception info from cache
     prediction  : prediction_array_type_ecc;                                          -- BHT record
-    hit         : std_ulogic;                                                         -- fetched pc hit BTB (don't used)
+    hit         : std_ulogic_vector(2 downto 0);                                                         -- fetched pc hit BTB (don't used)
     unaligned   : std_ulogic_vector(2 downto 0);                                      -- unaligned compressed instruction flag due to previous fetched pair
 
-    
-   de_rvc_aligned         : iword_pair_type;
-   de_rvc_comp_ill        : std_logic_vector(1 downto 0);
-   de_rvc_hold            : std_ulogic;
-   de_rvc_npc             : word3;
-   de_rvc_valid           : fetch_pair;
-   de_rvc_buffer_first    : std_ulogic;
-   de_rvc_buffer_sec      : std_ulogic;
-   de_rvc_buffer_third    : std_ulogic;
-   de_rvc_buffer_inst     : iword_type;
-   de_rvc_buffer_comp_ill : std_ulogic;
-
-  debug_flag  : std_ulogic;
 --    uninst      : iword16_type;                                                     -- unaligned compressed instruction
   end record;
 
@@ -790,18 +1019,18 @@ architecture rtl of iunv is
 
   -- Decode Stage <-> Register Access Stage -----------------------------------
   type regacc_reg_type is record
-    ctrl        : pipeline_ctrl_lanes_type;  -- pipeline control record
-    csr         : csr_type;                  -- CSR information
-    rfa1        : rfa_lanes_type;            -- register file record for op1
-    rfa2        : rfa_lanes_type;            -- register file record for op2
-    immv        : lanes_type;                -- immediate as a valid operand flags
-    imm         : wordx_lanes_type;          -- immediate operands
-    pcv         : lanes_type;                -- program counter as a valid operand flags
-    swap        : std_ulogic;                -- instructions are swapped in lanes
-    raso        : nv_ras_out_type;           -- RAS record
-    rasi        : nv_ras_in_type;            -- speculative RAS record
+    ctrl        : pipeline_ctrl_lanes_type_ecc;  -- pipeline control record
+    csr         : csr_type_ecc;                  -- CSR information
+    rfa1        : rfa_lanes_type_ecc;            -- register file record for op1
+    rfa2        : rfa_lanes_type_ecc;            -- register file record for op2
+    immv        : lanes_type_ecc;                -- immediate as a valid operand flags
+    imm         : wordx_lanes_type_ecc;          -- immediate operands
+    pcv         : lanes_type_ecc;                -- program counter as a valid operand flags
+    swap        : std_ulogic_vector(2 downto 0);                -- instructions are swapped in lanes
+    raso        : nv_ras_out_type_ecc;           -- RAS record
+    rasi        : nv_ras_in_type_ecc;            -- speculative RAS record
     csrw_eq     : std_logic_vector(3 downto 0);  --related to csr write hold checks
-    lalu_pre    : lanes_type;                -- prechecked lalu
+    lalu_pre    : lanes_type_ecc;                -- prechecked lalu
   end record;
 
 
@@ -1128,20 +1357,20 @@ architecture rtl of iunv is
     v.d.tval2                   := (others => '0');
     v.d.tval2type               := (others => '0');
     v.d.prediction              := (others => prediction_ecc_none);
-    v.d.hit                     := '0';
+    v.d.hit                     := (others => '0');
     v.d.unaligned               := (others => '0');
 --    v.d.uninst                  := ("00",(others => '0'), "000");
     -- Register Access Stage
-    v.a.ctrl                    := (others => pipeline_ctrl_none);
-    v.a.csr                     := csr_none;
+    v.a.ctrl                    := (others => pipeline_ctrl_none_ecc);
+    v.a.csr                     := csr_none_ecc;
     v.a.rfa1                    := (others => (others => '0'));
     v.a.rfa2                    := (others => (others => '0'));
-    v.a.imm                     := (others => zerox);
+    v.a.imm                     := (others => (others => '0'));
     v.a.immv                    := (others => '0');
     v.a.pcv                     := (others => '0');
-    v.a.swap                    := '0';
-    v.a.raso                    := nv_ras_out_none;
-    v.a.rasi                    := nv_ras_in_none;
+    v.a.swap                    := (others => '0');
+    v.a.raso                    := nv_ras_out_none_ecc;
+    v.a.rasi                    := nv_ras_in_none_ecc;
     v.a.csrw_eq                 := (others => '0');
     v.a.lalu_pre                := (others => '0');
     -- Execute Stage
@@ -1295,7 +1524,7 @@ architecture rtl of iunv is
   function ctrl(r : registers; stage : stage_type) return pipeline_ctrl_lanes_type is
   begin
     case stage is
-    when a  => return r.a.ctrl;
+    when a  => return to_pipeline_ctrl_lanes_type(r.a.ctrl);
     when e  => return r.e.ctrl;
     when m  => return r.m.ctrl;
     when x  => return r.x.ctrl;
@@ -1307,7 +1536,7 @@ architecture rtl of iunv is
   function csr(r : registers; stage : stage_type) return csr_type is
   begin
     case stage is
-    when a  => return r.a.csr;
+    when a  => return to_csr_type(r.a.csr);
     when e  => return r.e.csr;
     when m  => return r.m.csr;
     when x  => return r.x.csr;
@@ -1320,7 +1549,7 @@ architecture rtl of iunv is
   function rs1(r : registers; stage : stage_type) return rfa_lanes_type is
   begin
     case stage is
-    when a      => return r.a.rfa1;
+    when a      => return to_rfa_lanes_type(r.a.rfa1);
     when e      => return r.e.rfa1;
     when m      => return r.m.rfa1;
     when x      => return r.x.rfa1;
@@ -1336,7 +1565,7 @@ architecture rtl of iunv is
   function rs2(r : registers; stage : stage_type) return rfa_lanes_type is
   begin
     case stage is
-    when a      => return r.a.rfa2;
+    when a      => return to_rfa_lanes_type(r.a.rfa2);
     when e      => return r.e.rfa2;
     when m      => return r.m.rfa2;
     when x      => return r.x.rfa2;
@@ -1372,8 +1601,8 @@ architecture rtl of iunv is
   begin
     ret := false;
     if    stage = a then
-      c_valid := r.a.ctrl(lane).valid;
-      c_fusel := r.a.ctrl(lane).fusel;
+      c_valid := r.a.ctrl(lane).valid(0);
+      c_fusel := std_logic_vector(get_data(r.a.ctrl(lane).fusel));
     elsif stage = e then
       c_valid := r.e.ctrl(lane).valid;
       c_fusel := r.e.ctrl(lane).fusel;
@@ -1441,9 +1670,9 @@ architecture rtl of iunv is
     variable c_rd    : rfatype;
   begin
     if    stage = a then
-      c_valid := r.a.ctrl(lane).valid;
-      c_rdv   := r.a.ctrl(lane).rdv;
-      c_rd    := r.a.ctrl(lane).inst(11 downto 7);
+      c_valid := r.a.ctrl(lane).valid(0);
+      c_rdv   := r.a.ctrl(lane).rdv(0);
+      c_rd    := std_logic_vector(get_data(r.a.ctrl(lane).inst)(11 downto 7));
     elsif stage = e then
       c_valid := r.e.ctrl(lane).valid;
       c_rdv   := r.e.ctrl(lane).rdv;
@@ -1477,7 +1706,7 @@ architecture rtl of iunv is
     variable rdn_e   : std_logic;
   begin
     if    rfa.stage = a then
-      c_vs := r.a.ctrl(rfa.lane).rd_vs_rs;
+      c_vs := to_rd_vs_rs_type(r.a.ctrl(rfa.lane).rd_vs_rs);
     elsif rfa.stage = e then
       c_vs := r.e.ctrl(rfa.lane).rd_vs_rs;
     elsif rfa.stage = m then
@@ -1493,8 +1722,8 @@ architecture rtl of iunv is
     end if;
 
     if    stage = a then
-      c_valid := r.a.ctrl(lane).valid;
-      c_rdv   := r.a.ctrl(lane).rdv;
+      c_valid := r.a.ctrl(lane).valid(0);
+      c_rdv   := r.a.ctrl(lane).rdv(0);
       rdn_e   := rdn(0)(lane);
     elsif stage = e then
       c_valid := r.e.ctrl(lane).valid;
@@ -1543,8 +1772,8 @@ architecture rtl of iunv is
     variable c_rd    : rfatype;
   begin
     if    stage = a then
-      c_valid := r.a.ctrl(lane).valid;
-      c_rd    := r.a.ctrl(lane).inst(11 downto 7);
+      c_valid := r.a.ctrl(lane).valid(0);
+      c_rd    := rfatype(get_data(r.a.ctrl(lane).inst)(11 downto 7));
     elsif stage = e then
       c_valid := r.e.ctrl(lane).valid;
       c_rd    := r.e.ctrl(lane).inst(11 downto 7);
@@ -1572,7 +1801,7 @@ architecture rtl of iunv is
     variable rdn_e   : std_logic;
   begin
     if    rfa.stage = a then
-      c_vs := r.a.ctrl(rfa.lane).rd_vs_rs;
+      c_vs := to_rd_vs_rs_type(r.a.ctrl(rfa.lane).rd_vs_rs);
     elsif rfa.stage = e then
       c_vs := r.e.ctrl(rfa.lane).rd_vs_rs;
     elsif rfa.stage = m then
@@ -1588,7 +1817,7 @@ architecture rtl of iunv is
     end if;
 
     if    stage = a then
-      c_valid := r.a.ctrl(lane).valid;
+      c_valid := r.a.ctrl(lane).valid(0);
       rdn_e   := rdn(0)(lane);
     elsif stage = e then
       c_valid := r.e.ctrl(lane).valid;
@@ -1617,8 +1846,8 @@ architecture rtl of iunv is
     variable c_rd  : rfatype;
   begin
     if    stage = a then
-      c_rdv := r.a.ctrl(lane).rdv;
-      c_rd  := r.a.ctrl(lane).inst(11 downto 7);
+      c_rdv := r.a.ctrl(lane).rdv(0);
+      c_rd  := rfatype(get_data(r.a.ctrl(lane).inst)(11 downto 7));
     elsif stage = e then
       c_rdv := r.e.ctrl(lane).rdv;
       c_rd  := r.e.ctrl(lane).inst(11 downto 7);
@@ -1647,7 +1876,7 @@ architecture rtl of iunv is
     variable rdn_e : std_logic;
   begin
     if    rfa.stage = a then
-      c_vs := r.a.ctrl(rfa.lane).rd_vs_rs;
+      c_vs := to_rd_vs_rs_type(r.a.ctrl(rfa.lane).rd_vs_rs);
     elsif rfa.stage = e then
       c_vs := r.e.ctrl(rfa.lane).rd_vs_rs;
     elsif rfa.stage = m then
@@ -1663,7 +1892,7 @@ architecture rtl of iunv is
     end if;
 
     if    stage = a then
-      c_rdv := r.a.ctrl(lane).rdv;
+      c_rdv := r.a.ctrl(lane).rdv(0);
       rdn_e := rdn(0)(lane);
     elsif stage = e then
       c_rdv := r.e.ctrl(lane).rdv;
@@ -1751,8 +1980,8 @@ architecture rtl of iunv is
     variable c_inst  : word;
   begin
     if    stage = a then
-      c_valid := r.a.ctrl(fpu_lane).valid and not r.a.ctrl(fpu_lane).xc;
-      c_inst  := r.a.ctrl(fpu_lane).inst;
+      c_valid := r.a.ctrl(fpu_lane).valid(0) and not r.a.ctrl(fpu_lane).xc(0);
+      c_inst  := word(get_data(r.a.ctrl(fpu_lane).inst));
     elsif stage = e then
       c_valid := r.e.ctrl(fpu_lane).valid and not r.e.ctrl(fpu_lane).xc;
       c_inst  := r.e.ctrl(fpu_lane).inst;
@@ -1834,11 +2063,11 @@ architecture rtl of iunv is
     end if;
 
     for i in lanes'range loop
-      if r.a.ctrl(i).valid = '1' and r.a.ctrl(i).rdv = '1' and a_valid = '1' then
-        if r.a.ctrl(i).inst(11 downto 7) =  rfa1(dst_lane) then
+      if r.a.ctrl(i).valid(0) = '1' and r.a.ctrl(i).rdv(0) = '1' and a_valid = '1' then
+        if std_logic_vector(get_data(r.a.ctrl(i).inst)(11 downto 7)) =  rfa1(dst_lane) then
           forwarding.rfa1(stage_type'pos(a))(i) := '1';
         end if;
-        if r.a.ctrl(i).inst(11 downto 7) =  rfa2(dst_lane) then
+        if std_logic_vector(get_data(r.a.ctrl(i).inst)(11 downto 7)) =  rfa2(dst_lane) then
           forwarding.rfa2(stage_type'pos(a))(i) := '1';
         end if;
       end if;
@@ -2080,7 +2309,7 @@ architecture rtl of iunv is
     end loop;
 
     for i in lanes'range loop
-      if lalu_exe(i) = '1' and r.a.ctrl(i).valid = '1' then
+      if lalu_exe(i) = '1' and r.a.ctrl(i).valid(0) = '1' then
         for j in lanes'range loop
           if v_fusel_eq(fusel(j),ALU) then
             if v_rd_eq(r, a, i, rfa1(j)) or
@@ -3614,7 +3843,7 @@ architecture rtl of iunv is
 
     -- First Stage Mux for Op1
     if r.a.pcv(lane) = '1' then
-      mux_output_op1     := pc2xlen(r.a.ctrl(lane).pc);
+      mux_output_op1     := pc2xlen(word(get_data(r.a.ctrl(lane).pc)));
     elsif xc_forw_op1 = "10" then
       if v_fusel_eq(r, x, 0, LD) then
         mux_output_op1   := r.x.data(0)(wordx'range);
@@ -3667,8 +3896,8 @@ architecture rtl of iunv is
 
     -- First Stage Mux for Op2
       -- True even with zimm, but do not forward imm generated fron Branch.
-    if r.a.immv(lane) = '1' and r.a.ctrl(lane).inst(6 downto 0) /= OP_BRANCH then
-      mux_output_op2     := r.a.imm(lane);
+    if get_data(r.a.immv)(lane) = '1' and std_logic_vector(get_data(r.a.ctrl(lane).inst)(6 downto 0)) /= OP_BRANCH then
+      mux_output_op2     := word(get_data(r.a.imm(lane)));
     elsif xc_forw_op2 = "10" then
       if v_fusel_eq(r, x, 0, LD) then
         mux_output_op2   := r.x.data(0)(wordx'range);
@@ -3708,7 +3937,7 @@ architecture rtl of iunv is
 
     -- Second Stage Mux for Op2
     if xc_forw_op2(1) = '1' or mem_forw_op2(1) = '1' or wb_forw_op2(1) = '1' or
-       (r.a.immv(lane) = '1' and r.a.ctrl(lane).inst(6 downto 0) /= OP_BRANCH) then
+       (r.a.immv(lane) = '1' and std_logic_vector(get_data(r.a.ctrl(lane).inst)(6 downto 0)) /= OP_BRANCH) then
       op2                := mux_output_op2;
     elsif single_issue = 0 and
           ex_forw_op2 = "11" then
@@ -3896,7 +4125,7 @@ architecture rtl of iunv is
   end;
 
   -- Resolve Unconditional Jumps
-  procedure ujump_resolve(ctrl_in   : in  pipeline_ctrl_type;
+  procedure ujump_resolve(ctrl_in   : in  pipeline_ctrl_type_ecc;
                           target_in : in  pctype;
                           next_in   : in  pctype;
                           taken_in  : in  std_ulogic;
@@ -3906,7 +4135,7 @@ architecture rtl of iunv is
                           tval_out  : out wordx;
                           jump_out  : out std_ulogic;
                           addr_out  : out pctype) is
-    variable inst   : word       := ctrl_in.inst;
+    variable inst   : word       := word(get_data(ctrl_in.inst));
     -- Non-constant
     variable target : pctype     := target_in;
     variable xc     : std_ulogic := '0';
@@ -3918,7 +4147,7 @@ architecture rtl of iunv is
     --        * taken_in = 1 and not JAL -> We get an alias
 
     -- Generate Misprediction Signal due to wrong instruction.
-    if (taken_in and hit_in and ctrl_in.valid) = '1' and ctrl_in.xc = '0' then
+    if (taken_in and hit_in and ctrl_in.valid(0)) = '1' and ctrl_in.xc(0) = '0' then
       if inst(6 downto 0) /= OP_JAL and inst(6 downto 0) /= OP_BRANCH then
         mis     := '1';
         target  := next_in;
@@ -3926,7 +4155,7 @@ architecture rtl of iunv is
     end if;
 
     -- Generate Jump Signal
-    if ctrl_in.valid = '1' and ctrl_in.xc = '0' and inst(6 downto 0) = OP_JAL and (taken_in and hit_in) = '0' then
+    if ctrl_in.valid(0) = '1' and ctrl_in.xc(0) = '0' and inst(6 downto 0) = OP_JAL and (taken_in and hit_in) = '0' then
       jump      := '1';
     end if;
 
@@ -3995,7 +4224,7 @@ architecture rtl of iunv is
     hit_out     := hit_in;
   end;
 
-  procedure branch_misc(ctrl_in   : in  pipeline_ctrl_type;
+  procedure branch_misc(ctrl_in   : in  pipeline_ctrl_type_ecc;
                         taken_in  : in  std_ulogic;
                         hit_in    : in  std_ulogic;
                         imm_in    : in  wordx_pair_type;
@@ -4017,13 +4246,13 @@ architecture rtl of iunv is
     variable nextpc : pctype;
   begin
     -- Check if branch
-    if ctrl_in.valid = '1' and ctrl_in.xc = '0' and v_fusel_eq(ctrl_in.fusel, BRANCH) then
+    if ctrl_in.valid(0) = '1' and ctrl_in.xc(0) = '0' and v_fusel_eq(fuseltype(get_data(ctrl_in.fusel)), BRANCH) then
       valid := '1';
     end if;
 
     -- Operations:
     -- * BRANCH -> pc + sign_extend(imm)
-    pc     := pc2xlen(ctrl_in.pc);
+    pc     := pc2xlen(word(get_data(ctrl_in.pc)));
 
     target_l0 := std_logic_vector(signed(pc) + signed(imm_in(0)));
     target_l1 := std_logic_vector(signed(pc) + signed(imm_in(1)));
@@ -4040,7 +4269,7 @@ architecture rtl of iunv is
       end if;
     end if;
 
-    nextpc := npc_adder(ctrl_in.pc, ctrl_in.comp);
+    nextpc := npc_adder(word(get_data(ctrl_in.pc)), ctrl_in.comp(0));
 
     -- Generate Exception Signal
     if valid = '1' and taken_in = '1' and inst_addr_misaligned(active_extensions, target) then
@@ -6291,8 +6520,8 @@ architecture rtl of iunv is
     -- EX   LD -> Rn    *
     if v_fusel_eq(r, e, memory_lane, LD) then
       if v_fusel_eq(r, a, branch_lane, BRANCH) then
-        if v_rd_eq(r, e, memory_lane, r.a.rfa1(branch_lane)) or
-           v_rd_eq(r, e, memory_lane, r.a.rfa2(branch_lane)) then
+        if v_rd_eq(r, e, memory_lane, to_rfatype(r.a.rfa1(branch_lane))) or
+           v_rd_eq(r, e, memory_lane, to_rfatype(r.a.rfa2(branch_lane))) then
           lbranch     := '1';
         end if;
       end if;
@@ -6308,8 +6537,8 @@ architecture rtl of iunv is
         for i in lanes'range loop
           -- LALU in execution stage
           if r.e.alu(i).lalu = '1' then
-            if v_rd_eq(r, e, i, r.a.rfa1(branch_lane)) or
-               v_rd_eq(r, e, i, r.a.rfa2(branch_lane)) then
+            if v_rd_eq(r, e, i, to_rfatype(r.a.rfa1(branch_lane))) or
+               v_rd_eq(r, e, i, to_rfatype(r.a.rfa2(branch_lane))) then
               lbranch := '1';
             end if;
           end if;
@@ -6320,8 +6549,8 @@ architecture rtl of iunv is
       if v_fusel_eq(r, a, branch_lane, BRANCH) then
         -- LALU in execution stage
         if r.e.alu(csr_lane).lalu = '1' then
-          if v_rd_eq(r, e, csr_lane, r.a.rfa1(branch_lane)) or
-             v_rd_eq(r, e, csr_lane, r.a.rfa2(branch_lane)) then
+          if v_rd_eq(r, e, csr_lane, to_rfatype(r.a.rfa1(branch_lane))) or
+             v_rd_eq(r, e, csr_lane, to_rfatype(r.a.rfa2(branch_lane))) then
             lbranch   := '1';
           end if;
         end if;
@@ -6333,9 +6562,9 @@ architecture rtl of iunv is
     -- A    ALU,MUL,LD         BRANCH <- Rn   (no swap)
     -- If there is a swap it is not actually a dependency.
     if v_fusel_eq(r, a, 0, ALU or MUL or LD or FPU) then
-      if v_fusel_eq(r, a, branch_lane, BRANCH) and r.a.swap = '0' then
-        if v_rd_eq(r, a, 0, r.a.rfa1(branch_lane)) or
-           v_rd_eq(r, a, 0, r.a.rfa2(branch_lane)) then
+      if v_fusel_eq(r, a, branch_lane, BRANCH) and r.a.swap(0) = '0' then
+        if v_rd_eq(r, a, 0, to_rfatype(r.a.rfa1(branch_lane))) or
+           v_rd_eq(r, a, 0, to_rfatype(r.a.rfa2(branch_lane))) then
           lbranch     := '1';
           lbranchdp   := '1';
         end if;
@@ -6359,9 +6588,9 @@ architecture rtl of iunv is
     -- If there is a swap it is not actually a dependency.
     if v_fusel_eq(r, a, 0, ALU or LD or MUL or FPU)  then
       if single_issue = 0 and
-         v_fusel_eq(r, a, 1, ALU) and r.a.ctrl(1).rdv = '1' and r.a.swap = '0' then
-        if v_rd_eq(r, a, 0, r.a.rfa1(1)) or
-           v_rd_eq(r, a, 0, r.a.rfa2(1)) then
+         v_fusel_eq(r, a, 1, ALU) and r.a.ctrl(1).rdv(0) = '1' and r.a.swap(0) = '0' then
+        if v_rd_eq(r, a, 0, to_rfatype(r.a.rfa1(1))) or
+           v_rd_eq(r, a, 0, to_rfatype(r.a.rfa2(1))) then
           lalu(1)     := '1';
           laludp      := '1';
         end if;
@@ -6376,8 +6605,8 @@ architecture rtl of iunv is
     if v_fusel_eq(r, e, 0, LD) then
       for i in lanes'range loop
         if v_fusel_eq(r, a, i, ALU) then
-          if v_rd_eq(r, e, 0, r.a.rfa1(i)) or
-             v_rd_eq(r, e, 0, r.a.rfa2(i)) then
+          if v_rd_eq(r, e, 0, to_rfatype(r.a.rfa1(i))) or
+             v_rd_eq(r, e, 0, to_rfatype(r.a.rfa2(i))) then
             lalu(i)   := '1';
           end if;
         end if;
@@ -6393,8 +6622,8 @@ architecture rtl of iunv is
       if v_fusel_eq(r, e, j, MUL) then
         for i in lanes'range loop
           if v_fusel_eq(r, a, i, ALU) and not v_fusel_eq(r, a, lanes'high - i, MUL) then
-            if v_rd_eq(r, e, j, r.a.rfa1(i)) or
-               v_rd_eq(r, e, j, r.a.rfa2(i)) then
+            if v_rd_eq(r, e, j, to_rfatype(r.a.rfa1(i))) or
+               v_rd_eq(r, e, j, to_rfatype(r.a.rfa2(i))) then
               lalu(i) := '1';
             end if;
           end if;
@@ -6409,9 +6638,9 @@ architecture rtl of iunv is
     for j in lanes'range loop
       if r.e.alu(j).lalu = '1' then
         for i in lanes'range loop
-          if v_rd_eq(r, e, j, r.a.rfa1(i)) or
-             v_rd_eq(r, e, j, r.a.rfa2(i)) then
-            if r.a.ctrl(i).valid = '1' and v_fusel_eq(r, a, i, ALU) then
+          if v_rd_eq(r, e, j, to_rfatype(r.a.rfa1(i))) or
+             v_rd_eq(r, e, j, to_rfatype(r.a.rfa2(i))) then
+            if r.a.ctrl(i).valid(0) = '1' and v_fusel_eq(r, a, i, ALU) then
               lalu(i) := '1';
             end if;
           end if;
@@ -6439,14 +6668,14 @@ architecture rtl of iunv is
         -- Late branch and store, hold and drive branch to execute branch unit
         -- Note that this is with swap, so the store is really after the branch,
         -- and thus cannot be allowed to happen (which it would if late branch).
-        (v_fusel_eq(r, a, memory_lane, ST) and lbranch = '1' and r.a.swap = '1') or
+        (v_fusel_eq(r, a, memory_lane, ST) and lbranch = '1' and r.a.swap(0) = '1') or
         -- Attempted late ALU in lane 1 and its destination equals store (lane 0)
         -- source, with swap so the store is really after the ALU. Thus, the
         -- calculated value should be stored (which it cannot if late ALU).
         -- lalu(1) = '1' implies that the instruction at A(1) must be valid.
-        (v_fusel_eq(r, a, memory_lane, ST) and lalu(1) = '1' and rd(r, a, 1) = r.a.rfa2(memory_lane) and r.a.swap = '1') or
+        (v_fusel_eq(r, a, memory_lane, ST) and lalu(1) = '1' and rd(r, a, 1) = to_rfatype(r.a.rfa2(memory_lane)) and r.a.swap(0) = '1') or
         -- CSR (which is late) is not an issue in lane 0 (since same lane as store).
-        (v_fusel_eq(r, a, memory_lane, ST) and lcsr(1) = '1' and rd(r, a, 1) = r.a.rfa2(memory_lane) and r.a.swap = '1')) then
+        (v_fusel_eq(r, a, memory_lane, ST) and lcsr(1) = '1' and rd(r, a, 1) = to_rfatype(r.a.rfa2(memory_lane)) and r.a.swap(0) = '1')) then
       hold    := '1';
       hvec(0) := '1';
       -- Divert to early alu in case the other want to address it
@@ -6463,8 +6692,8 @@ architecture rtl of iunv is
       for j in lanes'range loop
         if r.e.alu(j).lalu = '1' then
           for i in lanes'range loop
-            if (v_rd_eq(r, e, j, r.a.rfa1(i)) or
-                v_rd_eq(r, e, j, r.a.rfa2(i))) and
+            if (v_rd_eq(r, e, j, to_rfatype(r.a.rfa1(i))) or
+                v_rd_eq(r, e, j, to_rfatype(r.a.rfa2(i)))) and
               -- If there is no late branch unit, that must also cause stall.
                ((late_branch = 0 and v_fusel_eq(r, a, i, BRANCH)) or
                 v_fusel_eq(r, a, i, NOT_LATE)) then
@@ -6479,8 +6708,8 @@ architecture rtl of iunv is
       -- Without late_alu there's still CSR handled in the exception stage.
       if r.e.alu(csr_lane).lalu = '1' then
         for i in lanes'range loop
-          if (v_rd_eq(r, e, csr_lane, r.a.rfa1(i)) or
-              v_rd_eq(r, e, csr_lane, r.a.rfa2(i))) and
+          if (v_rd_eq(r, e, csr_lane, to_rfatype(r.a.rfa1(i))) or
+              v_rd_eq(r, e, csr_lane, to_rfatype(r.a.rfa2(i)))) and
               -- If there is a late branch unit, that need not cause stall.
               not (late_branch = 1 and v_fusel_eq(r, a, i, BRANCH)) then
             hold      := '1';
@@ -6501,8 +6730,8 @@ architecture rtl of iunv is
       for j in lanes'range loop
         if r.m.alu(j).lalu = '1' then
           for i in lanes'range loop
-            if r.a.ctrl(i).valid = '1' then
-              if (v_rd_eq(r, m, j, r.a.rfa1(i))) or (v_rd_eq(r, m, j, r.a.rfa2(i)) and
+            if r.a.ctrl(i).valid(0) = '1' then
+              if (v_rd_eq(r, m, j, to_rfatype(r.a.rfa1(i)))) or (v_rd_eq(r, m, j, to_rfatype(r.a.rfa2(i))) and
                 not v_fusel_eq(r, a, i, ST)) then
                 hold    := '1';
                 hvec(2) := '1';
@@ -6516,8 +6745,8 @@ architecture rtl of iunv is
       -- Without late_alu there's still CSR handled in the exception stage.
       if r.m.alu(csr_lane).lalu = '1' then
         for i in lanes'range loop
-          if r.a.ctrl(i).valid = '1' then
-            if (v_rd_eq(r, m, csr_lane, r.a.rfa1(i))) or (v_rd_eq(r, m, csr_lane, r.a.rfa2(i)) and
+          if r.a.ctrl(i).valid(0) = '1' then
+            if (v_rd_eq(r, m, csr_lane, to_rfatype(r.a.rfa1(i)))) or (v_rd_eq(r, m, csr_lane, to_rfatype(r.a.rfa2(i))) and
               not v_fusel_eq(r, a, i, ST)) then
               hold      := '1';
               hvec(2)   := '1';
@@ -6538,14 +6767,14 @@ architecture rtl of iunv is
     -- All other cases require a hold here.
     if v_fusel_eq(r, e, memory_lane, LD) then
       for i in lanes'range loop
-        if r.a.ctrl(i).valid = '1' then
+        if r.a.ctrl(i).valid(0) = '1' then
           if not v_fusel_eq(r, a, i, BRANCH or ALU) then
-            if v_rd_eq(r, e, memory_lane, r.a.rfa1(i)) then
+            if v_rd_eq(r, e, memory_lane, to_rfatype(r.a.rfa1(i))) then
               hold    := '1';
               hvec(3) := '1';
               lddp    := '1';
             end if;
-            if v_rd_eq(r, e, memory_lane, r.a.rfa2(i)) then
+            if v_rd_eq(r, e, memory_lane, to_rfatype(r.a.rfa2(i))) then
               if not (i = 0 and v_fusel_eq(r, a, memory_lane, ST)) then
                 hold    := '1';
                 hvec(3) := '1';
@@ -6569,9 +6798,9 @@ architecture rtl of iunv is
       -- Check dependency for instruction in execute stage
       if v_fusel_eq(r, e, j, MUL) then
         for i in lanes'range loop
-          if r.a.ctrl(i).valid = '1' then
-            if (v_rd_eq(r, e, j, r.a.rfa1(i)) or
-                (v_rd_eq(r, e, j, r.a.rfa2(i)) and not v_fusel_eq(r, a, i, ST))) and
+          if r.a.ctrl(i).valid(0) = '1' then
+            if (v_rd_eq(r, e, j, to_rfatype(r.a.rfa1(i))) or
+                (v_rd_eq(r, e, j, to_rfatype(r.a.rfa2(i))) and not v_fusel_eq(r, a, i, ST))) and
                not (v_fusel_eq(r, a, i, ALU) and not v_fusel_eq(r, a, lanes'high - i, MUL)) then
               hold    := '1';
               hvec(4) := '1';
@@ -6644,7 +6873,7 @@ architecture rtl of iunv is
     ---------------------------------------------------------------------------
     if csr_ok(r, e) and not csr_read_only(r, e) and
        csr_category(csr_addr(r, e))(5) = '1'    and
-       (r.a.ctrl(0).valid = '1' or r.a.ctrl(one).valid = '1') then
+       (r.a.ctrl(0).valid(0) = '1' or r.a.ctrl(one).valid(0) = '1') then
       -- CSR is going to write an interrupt related register.
       hold    := '1';
       hvec(9) := '1';
@@ -6704,15 +6933,15 @@ architecture rtl of iunv is
       end if;
       -- All FPU operations must wait if the FPU is not ready.
       if fpu_ready = '0' and
-         ((r.a.ctrl(fpu_lane).valid    = '1' and is_fpu(r.a.ctrl(fpu_lane).inst)) or
-          (r.a.ctrl(memory_lane).valid = '1' and is_fpu_mem(r.a.ctrl(memory_lane).inst))) then
+         ((r.a.ctrl(fpu_lane).valid(0)    = '1' and is_fpu(word(get_data(r.a.ctrl(fpu_lane).inst)))) or
+          (r.a.ctrl(memory_lane).valid(0) = '1' and is_fpu_mem(word(get_data(r.a.ctrl(memory_lane).inst))))) then
         hold      := '1';
         hvec(14)  := '1';
       -- FPU operations that can be affected by CSR:s (or can affect them) must wait
       -- for any writes to them to take effect.
       -- FPU load/store are the main exempt things.
       elsif fpuhold(fpuhold'right) = '1' and
-            (r.a.ctrl(fpu_lane).valid = '1' and is_fpu(r.a.ctrl(fpu_lane).inst)) then
+            (r.a.ctrl(fpu_lane).valid(0) = '1' and is_fpu(word(get_data(r.a.ctrl(fpu_lane).inst)))) then
         hold      := '1';
       end if;
     end if;
@@ -6728,13 +6957,13 @@ architecture rtl of iunv is
     -- for the same reason as the loads.
     ---------------------------------------------------------------------------
     if ext_f = 1 then
-      if (r.a.ctrl(memory_lane).valid = '1' and is_fpu_mem(r.a.ctrl(memory_lane).inst)) or
-         (r.a.ctrl(fpu_lane).valid = '1' and is_fpu_from_int(r.a.ctrl(fpu_lane).inst)) then
+      if (r.a.ctrl(memory_lane).valid(0) = '1' and is_fpu_mem(word(get_data(r.a.ctrl(memory_lane).inst)))) or
+         (r.a.ctrl(fpu_lane).valid(0) = '1' and is_fpu_from_int(word(get_data(r.a.ctrl(fpu_lane).inst)))) then
         for i in lanes'range loop
-          if v_rd_eq(r, e,  i, r.a.rfa1(fpu_lane)) or
-             v_rd_eq(r, m,  i, r.a.rfa1(fpu_lane)) or
-             v_rd_eq(r, x,  i, r.a.rfa1(fpu_lane)) or
-             v_rd_eq(r, wb, i, r.a.rfa1(fpu_lane)) then
+          if v_rd_eq(r, e,  i, to_rfatype(r.a.rfa1(fpu_lane))) or
+             v_rd_eq(r, m,  i, to_rfatype(r.a.rfa1(fpu_lane))) or
+             v_rd_eq(r, x,  i, to_rfatype(r.a.rfa1(fpu_lane))) or
+             v_rd_eq(r, wb, i, to_rfatype(r.a.rfa1(fpu_lane))) then
             hold     := '1';
             hvec(15) := '1';
           end if;
@@ -6752,8 +6981,8 @@ architecture rtl of iunv is
            -- Is either store smaller than 32 bit?
            -- ST  inst: size < 32 when inst(13) = 0
            -- HSV inst: size < 32 when inst(27) = 0
-          ((((not is_hsv(r.a.ctrl(memory_lane).inst) and r.a.ctrl(memory_lane).inst(13) = '0') or
-             (    is_hsv(r.a.ctrl(memory_lane).inst) and r.a.ctrl(memory_lane).inst(27) = '0')) or
+          ((((not is_hsv(std_logic_vector(get_data(r.a.ctrl(memory_lane).inst))) and get_data(r.a.ctrl(memory_lane).inst)(13) = '0') or
+             (    is_hsv(std_logic_vector(get_data(r.a.ctrl(memory_lane).inst))) and get_data(r.a.ctrl(memory_lane).inst)(27) = '0')) or
             ((not is_hsv(r.e.ctrl(memory_lane).inst) and r.e.ctrl(memory_lane).inst(13) = '0') or
              (    is_hsv(r.e.ctrl(memory_lane).inst) and r.e.ctrl(memory_lane).inst(27) = '0'))
            ) or
@@ -6789,9 +7018,9 @@ architecture rtl of iunv is
     if mode_s = 1 and late_branch /= 0 then
       if v_fusel_eq(r, e, branch_lane, BRANCH) then
         if r.e.lbranch = '1' then
-          if is_sfence_vma(r.a.ctrl(memory_lane).inst)  or
-             (ext_h = 1 and (is_hfence_vvma(r.a.ctrl(memory_lane).inst) or
-                             is_hfence_gvma(r.a.ctrl(memory_lane).inst))) then
+          if is_sfence_vma(std_logic_vector(get_data(r.a.ctrl(memory_lane).inst)))  or
+             (ext_h = 1 and (is_hfence_vvma(std_logic_vector(get_data(r.a.ctrl(memory_lane).inst))) or
+                             is_hfence_gvma(std_logic_vector(get_data(r.a.ctrl(memory_lane).inst))))) then
             hold := '1';
           end if;
         end if;
@@ -9734,14 +9963,14 @@ begin
 
     -- Insert Exception ---------------------------------------------------
     for i in lanes'range loop
-      ra_xc(i)               := r.a.ctrl(i).xc;
-      ra_xc_cause(i)         := r.a.ctrl(i).cause;
-      ra_xc_tval(i)          := r.a.ctrl(i).tval;
+      ra_xc(i)               := r.a.ctrl(i).xc(0);
+      ra_xc_cause(i)         := cause_type(get_data(r.a.ctrl(i).cause));
+      ra_xc_tval(i)          := wordx(get_data(r.a.ctrl(i).tval));
     end loop;
-    if r.a.ctrl(csr_lane).xc = '0' and ra_csr_read_xc = '1' then
+    if r.a.ctrl(csr_lane).xc(0) = '0' and ra_csr_read_xc = '1' then
       ra_xc(csr_lane)        := '1';
       ra_xc_cause(csr_lane)  := ra_csr_read_cause;
-      ra_xc_tval(csr_lane)   := to0x(r.a.ctrl(csr_lane).inst);
+      ra_xc_tval(csr_lane)   := to0x(word(get_data(r.a.ctrl(csr_lane).inst)));
       if illegalTval0 = 1 then
         ra_xc_tval(csr_lane) := zerox;
       end if;
@@ -9750,10 +9979,10 @@ begin
     -- ALUs ---------------------------------------------------------------
     for i in lanes'range loop
       alu_gen(active_extensions,
-              r.a.ctrl(i).inst,
+              word(get_data(r.a.ctrl(i).inst)),
               ra_alu_ctrl(i)              -- ALU Control Signal
               );
-      ra_alu_valid(i) := r.a.ctrl(i).valid and to_bit(v_fusel_eq(r.a.ctrl(i).fusel, ALU));
+      ra_alu_valid(i) := r.a.ctrl(i).valid(0) and to_bit(v_fusel_eq(fuseltype(get_data(r.a.ctrl(i).fusel)), ALU));
       a_alu_forwarding(r,                 -- in  : Registers
                        i,                 -- in  : Lane
                        v.m.result,        -- in  : Data from ALU L0/L1 (C)
@@ -9795,27 +10024,27 @@ begin
 
     -- To Execute Stage ---------------------------------------------------
     for i in lanes'range loop
-      v.e.ctrl(i).pc      := r.a.ctrl(i).pc;
-      v.e.ctrl(i).inst    := r.a.ctrl(i).inst;
-      v.e.ctrl(i).cinst   := r.a.ctrl(i).cinst;
-      v.e.ctrl(i).valid   := r.a.ctrl(i).valid and not ra_flush;
-      v.e.ctrl(i).comp    := r.a.ctrl(i).comp;
-      v.e.ctrl(i).branch  := r.a.ctrl(i).branch;
-      v.e.ctrl(i).rdv     := r.a.ctrl(i).rdv;
-      v.e.ctrl(i).csrv    := r.a.ctrl(i).csrv;
-      v.e.ctrl(i).csrdo   := r.a.ctrl(i).csrdo;
+      v.e.ctrl(i).pc      := pctype(get_data(r.a.ctrl(i).pc));
+      v.e.ctrl(i).inst    := word(get_data(r.a.ctrl(i).inst));
+      v.e.ctrl(i).cinst   := word16(get_data(r.a.ctrl(i).cinst));
+      v.e.ctrl(i).valid   := r.a.ctrl(i).valid(0) and not ra_flush;
+      v.e.ctrl(i).comp    := r.a.ctrl(i).comp(0);
+      v.e.ctrl(i).branch  := to_branch_type(r.a.ctrl(i).branch);
+      v.e.ctrl(i).rdv     := r.a.ctrl(i).rdv(0);
+      v.e.ctrl(i).csrv    := r.a.ctrl(i).csrv(0);
+      v.e.ctrl(i).csrdo   := r.a.ctrl(i).csrdo(0);
       v.e.ctrl(i).xc      := ra_xc(i);
       v.e.ctrl(i).cause   := ra_xc_cause(i);
       v.e.ctrl(i).tval    := ra_xc_tval(i);
-      v.e.ctrl(i).fusel   := r.a.ctrl(i).fusel;
-      v.e.ctrl(i).mexc    := r.a.ctrl(i).mexc;
-      v.e.rfa1(i)         := r.a.rfa1(i);
-      v.e.rfa2(i)         := r.a.rfa2(i);
+      v.e.ctrl(i).fusel   := fuseltype(get_data(r.a.ctrl(i).fusel));
+      v.e.ctrl(i).mexc    := r.a.ctrl(i).mexc(0);
+      v.e.rfa1(i)         := to_rfatype(r.a.rfa1(i));
+      v.e.rfa2(i)         := to_rfatype(r.a.rfa2(i));
       -- Some kind of fetch fault?
-      if r.a.ctrl(i).xc = '1' and
-         (r.a.ctrl(i).cause = XC_INST_ACCESS_FAULT    or
-          r.a.ctrl(i).cause = XC_INST_INST_PAGE_FAULT or
-          r.a.ctrl(i).cause = XC_INST_INST_G_PAGE_FAULT) then
+      if r.a.ctrl(i).xc(0) = '1' and
+         (cause_type(get_data(r.a.ctrl(i).cause)) = XC_INST_ACCESS_FAULT    or
+          cause_type(get_data(r.a.ctrl(i).cause)) = XC_INST_INST_PAGE_FAULT or
+          cause_type(get_data(r.a.ctrl(i).cause)) = XC_INST_INST_G_PAGE_FAULT) then
         -- Pass NOOP into the pipeline if there was a fetch fault.
         -- After this point no random instructions will be in the pipeline,
         -- but up to here it is necessary to check xc!
@@ -9843,11 +10072,11 @@ begin
         end if;
       end if;
     end if;
-    v.e.csr               := r.a.csr;
+    v.e.csr               := to_csr_type(r.a.csr);
     v.e.csr.v             := ra_csr;
-    v.e.swap              := r.a.swap;
+    v.e.swap              := r.a.swap(0);
     v.e.stdata            := ra_stdata;
-    v.e.jimm              := r.a.imm(branch_lane);
+    v.e.jimm              := wordx(get_data(r.a.imm(branch_lane)));
     v.e.jop1              := ra_jump_op1;
     v.e.jumpforw(branch_lane) := ra_jump_forw;
     v.e.aluforw(0)        := ra_alu_forw(0);
@@ -9855,8 +10084,8 @@ begin
       v.e.aluforw(one)    := ra_alu_forw(one);
     end if;
     v.e.stforw            := ra_stdata_forw;
-    v.e.raso              := r.a.raso;
-    v.e.rasi              := r.a.rasi;
+    v.e.raso              := to_nv_ras_out_type(r.a.raso);
+    v.e.rasi              := to_nv_ras_in_type(r.a.rasi);
 
 
     -- Instruction Control ------------------------------------------------
@@ -9938,17 +10167,6 @@ begin
                 de_rvc_buffer_comp_ill,       -- out : Buffer comp is illegal
                 v.d.unaligned                 -- out : Unaligned
                 );
-    v.d.de_rvc_aligned := de_rvc_aligned;
-    v.d.de_rvc_comp_ill := de_rvc_comp_ill;
-    v.d.de_rvc_hold := de_rvc_hold;
-    v.d.de_rvc_npc := de_rvc_npc;
-    v.d.de_rvc_valid := de_rvc_valid;
-    v.d.de_rvc_buffer_first := de_rvc_buffer_first;
-    v.d.de_rvc_buffer_sec := de_rvc_buffer_sec;
-    v.d.de_rvc_buffer_third := de_rvc_buffer_third;
-    v.d.de_rvc_buffer_inst := de_rvc_buffer_inst;
-    v.d.de_rvc_buffer_comp_ill := de_rvc_buffer_comp_ill;
-    v.d.debug_flag := hold_fault;
 
     for i in fetch'range loop
       if de_rvc_valid(i) = '0' or de_rvc_aligned(i).c = '0' then
@@ -10223,7 +10441,7 @@ begin
                        r.csr.dfeaturesen.lalu_dis,
                        r.csr.dfeaturesen.dual_dis,
                        r.csr.dcsr.step,   -- in  : DCSR step
-                       r.a.lalu_pre,      -- in  : Late ALUs from RA
+                       lanes_type(get_data(r.a.lalu_pre)),      -- in  : Late ALUs from RA
                        r.d.mexc(0),          -- in  : Fetch exception
                        rd(v, e, 0),       -- in  : rd register from RA
                        v.e.ctrl(0).rdv,   -- in  : Valid rd register from RA
@@ -10384,7 +10602,7 @@ begin
     end if;
 
     for i in lanes'range loop
-      if (r.a.ctrl(i).mexc = '1' and r.a.ctrl(i).valid = '1') or
+      if (r.a.ctrl(i).mexc(0) = '1' and r.a.ctrl(i).valid(0) = '1') or
          (r.e.ctrl(i).mexc = '1' and r.e.ctrl(i).valid = '1') or
          (r.m.ctrl(i).mexc = '1' and r.m.ctrl(i).valid = '1') then
         -- Exception is not included since the xc will annul the cache on that stage
@@ -10399,57 +10617,57 @@ begin
 
     -- To Register Access Stage -------------------------------------------
     for i in lanes'range loop
-      v.a.ctrl(i).pc      := de_pc(i);
-      v.a.ctrl(i).inst    := de_inst_buff(i).d;
-      v.a.ctrl(i).cinst   := de_cinst_buff(i);
-      v.a.ctrl(i).valid   := de_issue(i) and de_inst_valid(i);
-      v.a.ctrl(i).comp    := de_comp(i);
-      v.a.ctrl(i).branch  := branch_none;
-      v.a.ctrl(i).rdv     := de_rfrd_valid(i);
-      v.a.ctrl(i).csrv    := de_csr_valid(i);
-      v.a.ctrl(i).csrdo   := de_csr_rdo(i);
-      v.a.ctrl(i).xc      := de_to_ra_xc(i);
-      v.a.ctrl(i).cause   := de_to_ra_cause(i);
-      v.a.ctrl(i).tval    := de_to_ra_tval(i);
-      v.a.ctrl(i).fusel   := de_fusel(i);
-      v.a.rfa1(i)         := de_rfa1(i);
-      v.a.rfa2(i)         := de_rfa2(i);
+      v.a.ctrl(i).pc      := hamming_encode(std_ulogic_vector(de_pc(i)));
+      v.a.ctrl(i).inst    := hamming_encode(std_ulogic_vector(de_inst_buff(i).d));
+      v.a.ctrl(i).cinst   := hamming_encode(std_ulogic_vector(de_cinst_buff(i)));
+      v.a.ctrl(i).valid   := (others => (de_issue(i) and de_inst_valid(i)));
+      v.a.ctrl(i).comp    := (others => de_comp(i));
+      v.a.ctrl(i).branch  := branch_none_ecc;
+      v.a.ctrl(i).rdv     := (others => de_rfrd_valid(i));
+      v.a.ctrl(i).csrv    := (others => de_csr_valid(i));
+      v.a.ctrl(i).csrdo   := (others => de_csr_rdo(i));
+      v.a.ctrl(i).xc      := (others => de_to_ra_xc(i));
+      v.a.ctrl(i).cause   := hamming_encode(std_ulogic_vector(de_to_ra_cause(i)));
+      v.a.ctrl(i).tval    := hamming_encode(std_ulogic_vector(de_to_ra_tval(i)));
+      v.a.ctrl(i).fusel   := hamming_encode(std_ulogic_vector(de_fusel(i)));
+      v.a.rfa1(i)         := hamming_encode(std_ulogic_vector(de_rfa1(i)));
+      v.a.rfa2(i)         := hamming_encode(std_ulogic_vector(de_rfa2(i)));
       de_rfa1_nmasked(i)  := de_rfa1_nmask(i);
       de_rfa2_nmasked(i)  := de_rfa2_nmask(i);
-      v.a.imm(i)          := de_imm(i);
+      v.a.imm(i)          := hamming_encode(std_ulogic_vector(de_imm(i)));
       v.a.immv(i)         := de_imm_valid(i);
       v.a.pcv(i)          := de_pc_valid(i);
       v.a.lalu_pre(i)     := de_lalu_pre(i);
-      v.a.ctrl(i).mexc    := de_inst_mexc(i);
+      v.a.ctrl(i).mexc    := (others => de_inst_mexc(i));
     end loop;
-    v.a.swap              := to_bit(single_issue = 0) and de_swap;
+    v.a.swap              := (others => (to_bit(single_issue = 0) and de_swap));
     v_a_inst_no_buf       := de_inst_no_buf;
 
     -- Swap Instructions --------------------------------------------------
     if de_swap = '1' then
       for i in lanes'range loop
-        v.a.ctrl(i).pc      := de_pc(1 - i);
-        v.a.ctrl(i).inst    := de_inst_buff(1 - i).d;
-        v.a.ctrl(i).cinst   := de_cinst_buff(1 - i);
-        v.a.ctrl(i).valid   := de_issue(1 - i) and de_inst_valid(1 - i);
-        v.a.ctrl(i).comp    := de_comp(1 - i);
-        v.a.ctrl(i).rdv     := de_rfrd_valid(1 - i);
-        v.a.ctrl(i).csrv    := de_csr_valid(1 - i);
-        v.a.ctrl(i).csrdo   := de_csr_rdo(1 - i);
-        v.a.ctrl(i).xc      := de_to_ra_xc(1 - i);
-        v.a.ctrl(i).cause   := de_to_ra_cause(1 - i);
-        v.a.ctrl(i).tval    := de_to_ra_tval(1 - i);
-        v.a.ctrl(i).fusel   := de_fusel(1 - i);
-        v.a.rfa1(i)         := de_rfa1(1 - i);
-        v.a.rfa2(i)         := de_rfa2(1 - i);
+        v.a.ctrl(i).pc      := hamming_encode(std_ulogic_vector(de_pc(1 - i)));
+        v.a.ctrl(i).inst    := hamming_encode(std_ulogic_vector(de_inst_buff(1 - i).d));
+        v.a.ctrl(i).cinst   := hamming_encode(std_ulogic_vector(de_cinst_buff(1 - i)));
+        v.a.ctrl(i).valid   := (others => (de_issue(1 - i) and de_inst_valid(1 - i)));
+        v.a.ctrl(i).comp    := (others => de_comp(1 - i));
+        v.a.ctrl(i).rdv     := (others => de_rfrd_valid(1 - i));
+        v.a.ctrl(i).csrv    := (others => de_csr_valid(1 - i));
+        v.a.ctrl(i).csrdo   := (others => de_csr_rdo(1 - i));
+        v.a.ctrl(i).xc      := (others => de_to_ra_xc(1 - i));
+        v.a.ctrl(i).cause   := hamming_encode(std_ulogic_vector(de_to_ra_cause(1 - i)));
+        v.a.ctrl(i).tval    := hamming_encode(std_ulogic_vector(de_to_ra_tval(1 - i)));
+        v.a.ctrl(i).fusel   := hamming_encode(std_ulogic_vector(de_fusel(1 - i)));
+        v.a.rfa1(i)         := to_rfatype_ecc(de_rfa1(1 - i));
+        v.a.rfa2(i)         := to_rfatype_ecc(de_rfa2(1 - i));
         de_rfa1_nmasked(i)  := de_rfa1_nmask(1 - i);
         de_rfa2_nmasked(i)  := de_rfa2_nmask(1 - i);
-        v.a.imm(i)          := de_imm(1 - i);
+        v.a.imm(i)          := hamming_encode(std_ulogic_vector(de_imm(1 - i)));
         v.a.immv(i)         := de_imm_valid(1 - i);
         v.a.pcv(i)          := de_pc_valid(1 - i);
         v.a.lalu_pre(i)     := de_lalu_pre(1 - i);
         v_a_inst_no_buf(i)  := de_inst_no_buf(1 - i);
-        v.a.ctrl(i).mexc    := de_inst_mexc(1 - i);
+        v.a.ctrl(i).mexc    := (others => de_inst_mexc(1 - i));
       end loop;
     end if;
     -- CSRs that may cause pipeline flush always execute alone, but it is
@@ -10473,41 +10691,41 @@ begin
 
     -- Related to CSR write hold checks in access stage
     v.a.csrw_eq := (others => '0');
-    if v.a.ctrl(csr_lane).inst(31 downto 20) = r.a.ctrl(csr_lane).inst(31 downto 20) then
+    if get_data(v.a.ctrl(csr_lane).inst)(31 downto 20) = get_data(r.a.ctrl(csr_lane).inst)(31 downto 20) then
       if csr_ok(r,a) then
         v.a.csrw_eq(0) := '1';
       end if;
     end if;
-    if v.a.ctrl(csr_lane).inst(31 downto 20) = r.e.ctrl(csr_lane).inst(31 downto 20) then
+    if std_logic_vector(get_data(v.a.ctrl(csr_lane).inst)(31 downto 20)) = r.e.ctrl(csr_lane).inst(31 downto 20) then
       if csr_ok(r,e) then
         v.a.csrw_eq(1) := '1';
       end if;
     end if;
-    if v.a.ctrl(csr_lane).inst(31 downto 20) = r.m.ctrl(csr_lane).inst(31 downto 20) then
+    if std_logic_vector(get_data(v.a.ctrl(csr_lane).inst)(31 downto 20)) = r.m.ctrl(csr_lane).inst(31 downto 20) then
       if csr_ok(r,m) then
         v.a.csrw_eq(2) := '1';
       end if;
     end if;
-    if v.a.ctrl(csr_lane).inst(31 downto 20) = r.x.ctrl(csr_lane).inst(31 downto 20) then
+    if std_logic_vector(get_data(v.a.ctrl(csr_lane).inst)(31 downto 20)) = r.x.ctrl(csr_lane).inst(31 downto 20) then
       if csr_ok(r,x) then
         v.a.csrw_eq(3) := '1';
       end if;
     end if;
 
-    v.a.csr.r             := '0';
-    v.a.csr.w             := '0';
+    v.a.csr.r             := (others => '0');
+    v.a.csr.w             := (others => '0');
     if csr_ok(v, a) then
-      v.a.csr.r           := '1';
-      v.a.csr.w           := '1';
+      v.a.csr.r           := (others => '1');
+      v.a.csr.w           := (others => '1');
     end if;
     if csr_write_only(v, a) then
-      v.a.csr.r           := '0';
+      v.a.csr.r           := (others => '0');
     end if;
     if csr_read_only(v, a) then
-      v.a.csr.w           := '0';
+      v.a.csr.w           := (others => '0');
     end if;
-    v.a.csr.category      := csr_category(csr_addr(v, a));
-    v.a.csr.ctrl          := csralu_gen(v.a.ctrl(csr_lane).inst);
+    v.a.csr.category      := hamming_encode(std_ulogic_vector(csr_category(csr_addr(v, a))));
+    v.a.csr.ctrl          := hamming_encode(std_ulogic_vector(csralu_gen(word(get_data(v.a.ctrl(csr_lane).inst)))));
 
     de_bhto_taken := de_rvc_bhto_taken;
     de_btbo_hit   := de_rvc_btb_hit;
@@ -10521,8 +10739,8 @@ begin
     de_raso.hit := '0';
 
     -- Return Address Stack Control ---------------------------------------
-    v.a.raso.hit   := de_raso.hit;
-    v.a.raso.rdata := de_raso.rdata;
+    v.a.raso.hit   := (others => de_raso.hit);
+    v.a.raso.rdata := hamming_encode(std_ulogic_vector(de_raso.rdata));
 
     branch_misc(v.a.ctrl(branch_lane),
                 de_bhto_taken(branch_lane),
@@ -10538,16 +10756,16 @@ begin
                 de_branch_addr);
 
     -- Update Branch Control ----------------------------------------------
-    v.a.ctrl(branch_lane).branch.valid := de_branch_valid;
-    v.a.ctrl(branch_lane).branch.addr  := de_branch_addr;
-    v.a.ctrl(branch_lane).branch.naddr := de_branch_next;
-    v.a.ctrl(branch_lane).branch.taken := de_branch_taken;
-    v.a.ctrl(branch_lane).branch.dir   := de_bhto_dir1;
-    v.a.ctrl(branch_lane).branch.hit   := de_branch_hit;
+    v.a.ctrl(branch_lane).branch.valid := (others => de_branch_valid);
+    v.a.ctrl(branch_lane).branch.addr  := hamming_encode(std_ulogic_vector(de_branch_addr));
+    v.a.ctrl(branch_lane).branch.naddr := hamming_encode(std_ulogic_vector(de_branch_next));
+    v.a.ctrl(branch_lane).branch.taken := (others => de_branch_taken);
+    v.a.ctrl(branch_lane).branch.dir   := hamming_encode(std_ulogic_vector(de_bhto_dir1));
+    v.a.ctrl(branch_lane).branch.hit   := (others => de_branch_hit);
 
     -- Invalid Second Instruction ----------------------------------------
-    if de_branch = '1' and v.a.swap = '1' then
-      v.a.ctrl(0).valid := '0';
+    if de_branch = '1' and v.a.swap(0) = '1' then
+      v.a.ctrl(0).valid := (others => '0');
     end if;
 
     -- Early JAL ----------------------------------------------------------
@@ -10565,26 +10783,26 @@ begin
 
     -- Store JAL Address --------------------------------------------------
     if de_jump = '1' then
-      v.a.ctrl(branch_lane).branch.addr := de_jump_addr;
+      v.a.ctrl(branch_lane).branch.addr := hamming_encode(std_ulogic_vector(de_jump_addr));
     end if;
 
     -- Insert Exception ---------------------------------------------------
-    if v.a.ctrl(branch_lane).xc = '0' then
+    if v.a.ctrl(branch_lane).xc(0) = '0' then
       -- Early Jump
       if de_jump_xc = '1' then
-        v.a.ctrl(branch_lane).xc    := '1';
-        v.a.ctrl(branch_lane).cause := de_jump_cause;
-        v.a.ctrl(branch_lane).tval  := pc2xlen(de_jump_addr);
+        v.a.ctrl(branch_lane).xc    := (others => '1');
+        v.a.ctrl(branch_lane).cause := hamming_encode(std_ulogic_vector(de_jump_cause));
+        v.a.ctrl(branch_lane).tval  := hamming_encode(std_ulogic_vector(pc2xlen(de_jump_addr)));
       -- Jump from RAS
       elsif de_ras_jump_xc = '1' then
-        v.a.ctrl(branch_lane).xc    := '1';
-        v.a.ctrl(branch_lane).cause := de_ras_jump_cause;
-        v.a.ctrl(branch_lane).tval  := de_ras_jump_tval;
+        v.a.ctrl(branch_lane).xc    := (others => '1');
+        v.a.ctrl(branch_lane).cause := hamming_encode(std_ulogic_vector(de_ras_jump_cause));
+        v.a.ctrl(branch_lane).tval  := hamming_encode(std_ulogic_vector(de_ras_jump_tval));
       -- Early Branch
       elsif de_branch_xc = '1' then
-        v.a.ctrl(branch_lane).xc    := '1';
-        v.a.ctrl(branch_lane).cause := de_branch_cause;
-        v.a.ctrl(branch_lane).tval  := pc2xlen(de_branch_addr);
+        v.a.ctrl(branch_lane).xc    := (others => '1');
+        v.a.ctrl(branch_lane).cause := hamming_encode(std_ulogic_vector(de_branch_cause));
+        v.a.ctrl(branch_lane).tval  := hamming_encode(std_ulogic_vector(pc2xlen(de_branch_addr)));
       end if;
     end if;
 
@@ -10597,8 +10815,8 @@ begin
     for i in lanes'range loop
       rfi_raddr12(i)   := de_rfa1_nmasked(i);
       rfi_raddr34(i)   := de_rfa2_nmasked(i);
-      rfi_ren12(i)     := v.a.ctrl(i).valid;
-      rfi_ren34(i)     := v.a.ctrl(i).valid;
+      rfi_ren12(i)     := v.a.ctrl(i).valid(0);
+      rfi_ren34(i)     := v.a.ctrl(i).valid(0);
     end loop;
 
 
@@ -10616,13 +10834,13 @@ begin
       for i in 0 to 3 - (2 * single_issue) loop
         if de_bjump_pos(i) = '1' then
           for j in lanes'range loop
-            if v.a.ctrl(j).valid = '1' and v.a.ctrl(j).pc(2 downto 1) = u2vec(i, 2)
+            if v.a.ctrl(j).valid(0) = '1' and std_logic_vector(get_data(v.a.ctrl(j).pc)(2 downto 1)) = u2vec(i, 2)
               and v_a_inst_no_buf(j) = '0' and single_issue = 0 then
               de_hold_pc  := '0';
               de_rvc_hold := '0';
             end if;
             if single_issue /= 0 then
-              if v.a.ctrl(j).valid = '1' and v.a.ctrl(j).pc(1 downto 1) = u2vec(i, 1) and
+              if v.a.ctrl(j).valid(0) = '1' and std_logic_vector(get_data(v.a.ctrl(j).pc)(1 downto 1)) = u2vec(i, 1) and
                 v_a_inst_no_buf(j) = '0' then
                 de_hold_pc  := '0';
                 de_rvc_hold := '0';
@@ -10845,7 +11063,7 @@ begin
 
     if de_nullify = '1' then
       for i in lanes'range loop
-        v.a.ctrl(i).valid := '0';
+        v.a.ctrl(i).valid := (others => '0');
       end loop;
       v.d.buff.valid      := (others => '0');
       v.d.valid           := (others => '0');
@@ -10856,12 +11074,12 @@ begin
       for i in 0 to 3 - (2 * single_issue) loop
         if de_bjump_pos(i) = '1' then
           for j in lanes'range loop
-            if v.a.ctrl(j).valid = '1' and v.a.ctrl(j).pc(2 downto 1) = u2vec(i, 2)
+            if v.a.ctrl(j).valid(0) = '1' and std_logic_vector(get_data(v.a.ctrl(j).pc)(2 downto 1)) = u2vec(i, 2)
             and v_a_inst_no_buf(j) = '0' and single_issue = 0 then
               v.d.valid := (others => '0');
             end if;
             if single_issue /= 0 then
-              if v.a.ctrl(j).valid = '1' and v.a.ctrl(j).pc(1 downto 1) = u2vec(i, 1) and v_a_inst_no_buf(j) = '0' then
+              if v.a.ctrl(j).valid(0) = '1' and std_logic_vector(get_data(v.a.ctrl(j).pc)(1 downto 1)) = u2vec(i, 1) and v_a_inst_no_buf(j) = '0' then
                 v.d.valid := (others => '0');
               end if;
             end if;
@@ -11281,10 +11499,10 @@ begin
     -- Speculative updating of FPU register dirty status
     -- It does not matter that we sometimes set dirty for instructions
     -- that are later nullified. This is allowed by the standard.
-    if (r.a.ctrl(fpu_lane).valid    = '1' and r.a.ctrl(fpu_lane).xc = '0' and
-        is_fpu_modify(r.a.ctrl(fpu_lane).inst)) or
-       (r.a.ctrl(memory_lane).valid = '1' and r.a.ctrl(memory_lane).xc = '0' and
-        is_fpu_modify(r.a.ctrl(memory_lane).inst)) then
+    if (r.a.ctrl(fpu_lane).valid(0)    = '1' and r.a.ctrl(fpu_lane).xc(0) = '0' and
+        is_fpu_modify(word(get_data(r.a.ctrl(fpu_lane).inst)))) or
+       (r.a.ctrl(memory_lane).valid(0) = '1' and r.a.ctrl(memory_lane).xc(0) = '0' and
+        is_fpu_modify(word(get_data(r.a.ctrl(memory_lane).inst)))) then
       v.csr.mstatus.fs    := "11";
       if r.csr.v = '1' then
         v.csr.vsstatus.fs := "11";
@@ -11385,7 +11603,7 @@ begin
         v.d.tval2     := hamming_encode(hamming_decode(r.d.tval2));
         v.d.tval2type := hamming_encode(hamming_decode(r.d.tval2type));
         v.d.prediction:= r.d.prediction;
-        v.d.hit       := r.d.hit;
+        v.d.hit       := (others => tmr_voter(r.d.hit(0), r.d.hit(1), r.d.hit(2)));
         v.d.unaligned := (others => tmr_voter(r.d.unaligned(0), r.d.unaligned(1), r.d.unaligned(2)));
 
       else
@@ -11481,7 +11699,7 @@ begin
         v.x.ctrl(lane).rd_vs_rs := check_forwarding(v, x, lane);
         v.m.ctrl(lane).rd_vs_rs := check_forwarding(v, m, lane);
         v.e.ctrl(lane).rd_vs_rs := check_forwarding(v, e, lane);
-        v.a.ctrl(lane).rd_vs_rs := check_forwarding(v, a, lane);
+        v.a.ctrl(lane).rd_vs_rs := to_rd_vs_rs_type_ecc(check_forwarding(v, a, lane));
       end loop;
     end if;
 

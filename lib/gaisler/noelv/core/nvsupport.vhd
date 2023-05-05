@@ -90,6 +90,12 @@ package nvsupport is
   subtype  rfatype   is std_logic_vector(RFBITS - 1 downto 0);
   subtype  fuseltype is std_logic_vector(FUSELBITS - 1 downto 0);
 
+  constant RFA_ECC_RANGE  : ecc_range := hamming_indices(RFBITS);
+  subtype  rfatype_ecc is ecc_vector(RFA_ECC_RANGE.left downto RFA_ECC_RANGE.right);
+
+  constant FUSEL_ECC_RANGE  : ecc_range := hamming_indices(FUSELBITS);
+  subtype  fuseltype_ecc is ecc_vector(FUSEL_ECC_RANGE.left downto FUSEL_ECC_RANGE.right);
+
   type     x_type is (x_first,
                       x_single_issue, x_late_alu, x_late_branch, x_muladd,
                       x_logfilter, x_fpu_debug, x_dtcm, x_itcm,
