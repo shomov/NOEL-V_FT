@@ -45,6 +45,8 @@ use gaisler.noelv.nv_debug_in_vector;
 use gaisler.noelv.nv_debug_out_vector;
 use gaisler.noelv.nv_counter_out_type;
 use gaisler.noelv.nv_etrace_out_type;
+library shomov;
+use shomov.nmr_common.all;
 library extras;
 use extras.hamming_edac.all;
 
@@ -723,6 +725,11 @@ package noelvint is
     rdata       : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);
     hit         : std_ulogic_vector(2 downto 0);
   end record;
+
+  function to_nv_ras_in_type(ras_ecc : nv_ras_in_type_ecc) return nv_ras_in_type;
+  function nv_ras_in_has_error(ras_ecc : nv_ras_in_type_ecc) return boolean;
+  function to_nv_ras_out_type(ras_ecc : nv_ras_out_type_ecc) return nv_ras_out_type;
+  function nv_ras_out_has_error(ras_ecc : nv_ras_out_type_ecc) return boolean;
 
   constant nv_ras_out_none : nv_ras_out_type := (
     rdata       => (others => '0'),
@@ -1417,5 +1424,36 @@ package body noelvint is
   -----------------------------------------------------------------------------
 
 
+  function to_nv_ras_in_type(ras_ecc : nv_ras_in_type_ecc) return nv_ras_in_type is
+    variable res : nv_ras_in_type;
+  begin
+    res.push    := ras_ecc.push(0);
+    res.pop     := ras_ecc.pop(0);
+    res.wdata   := wordx(get_data(ras_ecc.wdata));
+    res.flush   := ras_ecc.flush(0);
+    return res;
+  end;
+  
+  function nv_ras_in_has_error(ras_ecc : nv_ras_in_type_ecc) return boolean is
+  begin
+    return tmr_has_error(ras_ecc.push(0), ras_ecc.push(1), ras_ecc.push(2)) or
+            tmr_has_error(ras_ecc.pop(0), ras_ecc.pop(1), ras_ecc.pop(2)) or
+            hamming_has_error(ras_ecc.wdata) or
+            tmr_has_error(ras_ecc.flush(0), ras_ecc.flush(1), ras_ecc.flush(2));
+  end;
+
+  function to_nv_ras_out_type(ras_ecc : nv_ras_out_type_ecc) return nv_ras_out_type is
+    variable res : nv_ras_out_type;
+  begin
+    res.rdata   := wordx(get_data(ras_ecc.rdata));
+    res.hit   := ras_ecc.hit(0);
+    return res;
+  end;
+  
+  function nv_ras_out_has_error(ras_ecc : nv_ras_out_type_ecc) return boolean is
+  begin
+    return hamming_has_error(ras_ecc.rdata) or
+            tmr_has_error(ras_ecc.hit(0), ras_ecc.hit(1), ras_ecc.hit(2));
+  end;
 
 end package body;

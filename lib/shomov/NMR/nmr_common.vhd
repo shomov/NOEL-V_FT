@@ -21,6 +21,12 @@ package nmr_common is
         c    : in std_ulogic
     ) return boolean;
 
+    function tmr_vector_has_error (
+        a    : in std_ulogic_vector;
+        b    : in std_ulogic_vector;
+        c    : in std_ulogic_vector
+    ) return boolean;
+
 end;
 
 package body nmr_common is
@@ -59,6 +65,17 @@ package body nmr_common is
         a    : in std_ulogic;
         b    : in std_ulogic;
         c    : in std_ulogic
+        )
+    return boolean is
+    begin
+        return (a /= b) or (a /= c) or (b /= c);
+    end;
+
+
+    function tmr_vector_has_error (
+        a    : in std_ulogic_vector;
+        b    : in std_ulogic_vector;
+        c    : in std_ulogic_vector
         )
     return boolean is
     begin

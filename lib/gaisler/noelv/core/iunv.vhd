@@ -75,10 +75,14 @@ use gaisler.noelvint.nv_btb_in_type;
 use gaisler.noelvint.nv_btb_out_type;
 use gaisler.noelvint.nv_ras_in_type;
 use gaisler.noelvint.nv_ras_in_type_ecc;
+use gaisler.noelvint.to_nv_ras_in_type;
+use gaisler.noelvint.nv_ras_in_has_error;
 use gaisler.noelvint.nv_ras_in_none;
 use gaisler.noelvint.nv_ras_in_none_ecc;
 use gaisler.noelvint.nv_ras_out_type;
 use gaisler.noelvint.nv_ras_out_type_ecc;
+use gaisler.noelvint.to_nv_ras_out_type;
+use gaisler.noelvint.nv_ras_out_has_error;
 use gaisler.noelvint.nv_ras_out_none;
 use gaisler.noelvint.nv_ras_out_none_ecc;
 use gaisler.noelvint.nv_dcache_in_type;
@@ -565,8 +569,9 @@ architecture rtl of iunv is
   
   subtype lanes_type     is std_logic_vector(lanes'high downto lanes'low);  -- Must be n downto 0!
 
-  constant LANES_ECC_RANGE  : ecc_range := hamming_indices(lanes'length);  -- !
-  subtype lanes_type_ecc     is ecc_vector(LANES_ECC_RANGE.left downto LANES_ECC_RANGE.right);  -- Must be n downto 0!
+  -- constant LANES_ECC_RANGE  : ecc_range := hamming_indices(lanes'length);  -- !
+  -- subtype lanes_type_ecc     is ecc_vector(LANES_ECC_RANGE.left downto LANES_ECC_RANGE.right);  -- Must be n downto 0!
+  type lanes_type_tmr     is array (0 to 2) of std_logic_vector(lanes'high downto lanes'low);  -- Must be n downto 0!
 
   -- Lanes types
   type pc_lanes_type     is array (lanes'range) of pctype;
@@ -599,6 +604,15 @@ architecture rtl of iunv is
   begin
     for i in lanes'range loop
       res(i) := std_logic_vector(get_data(rfa(i)));
+    end loop;
+    return res;
+  end;
+
+  function rfa_lanes_has_error(rfa : rfa_lanes_type_ecc) return boolean is
+    variable res : boolean := FALSE;
+  begin
+    for i in lanes'range loop
+      res := res or hamming_has_error(rfa(i));
     end loop;
     return res;
   end;
@@ -648,7 +662,7 @@ architecture rtl of iunv is
 
   type branch_type_ecc is record
     valid       : std_ulogic_vector(2 downto 0);                          -- instruction is a branch instruction
-    dir         : ecc_vector(DIR_ECC_RANGE.left downto DIR_ECC_RANGE.right);  -- branch output prediction from the BHT
+    dir         : std_logic_vector(bhti.wdata'range);  -- branch output prediction from the BHT
     addr        : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);                              -- target address where to branch
     naddr       : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);                              -- address of the next instruction
     taken       : std_ulogic_vector(2 downto 0);                          -- branch has been taken
@@ -656,11 +670,21 @@ architecture rtl of iunv is
     mpred       : std_ulogic_vector(2 downto 0);                          -- branch mispredicted
   end record;
 
+  function branch_has_error(branch : branch_type_ecc) return boolean is
+  begin
+    return tmr_has_error(branch.valid(0), branch.valid(1), branch.valid(2)) or
+            hamming_has_error(branch.addr) or
+            hamming_has_error(branch.naddr) or
+            tmr_has_error(branch.taken(0), branch.taken(1), branch.taken(2)) or
+            tmr_has_error(branch.hit(0), branch.hit(1), branch.hit(2)) or
+            tmr_has_error(branch.mpred(0), branch.mpred(1), branch.mpred(2));
+  end;
+
   function to_branch_type(branch : branch_type_ecc) return branch_type is
     variable res : branch_type;
   begin
     res.valid  := branch.valid(0);
-    res.dir    := std_logic_vector(get_data(branch.dir));
+    res.dir    := branch.dir;
     res.addr   := std_logic_vector(get_data(branch.addr));
     res.naddr  := std_logic_vector(get_data(branch.naddr));
     res.taken  := branch.taken(0);
@@ -673,7 +697,7 @@ architecture rtl of iunv is
     variable res : branch_type_ecc;
   begin
     res.valid  := (others => branch.valid);
-    res.dir    := hamming_encode(std_ulogic_vector(branch.dir));
+    res.dir    := branch.dir;
     res.addr   := hamming_encode(std_ulogic_vector(branch.addr));
     res.naddr  := hamming_encode(std_ulogic_vector(branch.naddr));
     res.taken  := (others => branch.taken);
@@ -706,7 +730,7 @@ architecture rtl of iunv is
 
   -- Forwarding type --------------------------------------------------------
   type rd_src_type is array (stage_type'pos(a) to stage_type'pos(wb)) of lanes_type;
-  type rd_src_type_ecc is array (stage_type'pos(a) to stage_type'pos(wb)) of lanes_type_ecc;
+  type rd_src_type_ecc is array (stage_type'pos(a) to stage_type'pos(wb)) of lanes_type_tmr;
   type rd_vs_rs_type is record
     rfa1        : rd_src_type;
     rfa2        : rd_src_type;
@@ -717,12 +741,21 @@ architecture rtl of iunv is
     rfa2        : rd_src_type_ecc;
   end record;
 
+  -- function rd_vs_rs_has_error(rd_vs_rs : rd_vs_rs_type_ecc) return boolean is
+  --   variable res : boolean := FALSE;
+  -- begin
+  --   for i in rd_src_type_ecc'range loop
+  --     res := res or hamming_has_error(rd_vs_rs.rfa1(i)) or hamming_has_error(rd_vs_rs.rfa2(i));
+  --   end loop;
+  --   return res;
+  -- end;
+
   function to_rd_vs_rs_type(rd_vs_rv : rd_vs_rs_type_ecc) return rd_vs_rs_type is
     variable res : rd_vs_rs_type;
   begin
     for i in rd_src_type'range loop
-      res.rfa1(i) := std_logic_vector(get_data(rd_vs_rv.rfa1(i)));
-      res.rfa2(i) := std_logic_vector(get_data(rd_vs_rv.rfa2(i)));
+      res.rfa1(i) := rd_vs_rv.rfa1(i)(0);
+      res.rfa2(i) := rd_vs_rv.rfa2(i)(0);
     end loop;
     return res;
   end;
@@ -731,16 +764,18 @@ architecture rtl of iunv is
     variable res : rd_vs_rs_type_ecc;
   begin
     for i in rd_src_type_ecc'range loop
-      res.rfa1(i) := hamming_encode(std_ulogic_vector(rd_vs_rv.rfa1(i)));
-      res.rfa2(i) := hamming_encode(std_ulogic_vector(rd_vs_rv.rfa2(i)));
+      for j in lanes_type_tmr'range loop
+      res.rfa1(i)(j) := rd_vs_rv.rfa1(i);
+      res.rfa2(i)(j) := rd_vs_rv.rfa2(i);
+      end loop;
     end loop;
     return res;
   end;
 
   constant rd_vs_rs_none : rd_vs_rs_type := ((others => (others => '0')),
                                              (others => (others => '0')));
-  constant rd_vs_rs_none_ecc : rd_vs_rs_type_ecc := ((others => (others => '0')),
-                                             (others => (others => '0')));
+  constant rd_vs_rs_none_ecc : rd_vs_rs_type_ecc := ((others => (others => (others => '0'))),
+                                             (others => (others => (others => '0'))));
 
   subtype rs_type is integer range 1 to 2;
   type rfa_tuple is record
@@ -790,6 +825,25 @@ architecture rtl of iunv is
     fpu         : fpu_id;                       -- FPU issue ID
     fpu_flush   : std_ulogic;                   -- FPU instruction has been flushed
   end record;
+  
+  function pipeline_ctrl_has_error(pipe : pipeline_ctrl_type_ecc) return boolean is
+  begin
+    return hamming_has_error(pipe.pc) or
+            hamming_has_error(pipe.inst) or
+            hamming_has_error(pipe.cinst) or
+            tmr_has_error(pipe.valid(0), pipe.valid(1), pipe.valid(2)) or
+            tmr_has_error(pipe.comp(0), pipe.comp(1), pipe.comp(2)) or
+            branch_has_error(pipe.branch) or
+            -- tmr_has_error(pipe.rdv(0), pipe.rdv(1), pipe.rdv(2)) or
+            -- rd_vs_rs_has_error(pipe.rd_vs_rs) or
+            -- tmr_has_error(pipe.csrv(0), pipe.csrv(1), pipe.csrv(2)) or
+            -- tmr_has_error(pipe.csrdo(0), pipe.csrdo(1), pipe.csrdo(2)) or
+            tmr_has_error(pipe.xc(0), pipe.xc(1), pipe.xc(2)) or
+            tmr_has_error(pipe.mexc(0), pipe.mexc(1), pipe.mexc(2)) or
+            hamming_has_error(pipe.cause) or
+            hamming_has_error(pipe.tval) or
+            hamming_has_error(pipe.fusel);
+  end;
 
   constant pipeline_ctrl_none   : pipeline_ctrl_type := (
     pc          => PC_RESET,
@@ -852,6 +906,15 @@ architecture rtl of iunv is
     v        : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);         -- Value read from CSR register
   end record;
   
+  function csr_has_error(csr : csr_type_ecc) return boolean is
+  begin
+    return tmr_has_error(csr.r(0), csr.r(1), csr.r(2)) or
+            tmr_has_error(csr.w(0), csr.w(1), csr.w(2)) or
+            hamming_has_error(csr.category) or
+            hamming_has_error(csr.ctrl) or
+            hamming_has_error(csr.v);
+  end;
+  
   function to_csr_type(csr : csr_type_ecc) return csr_type is
     variable res : csr_type;
   begin
@@ -881,6 +944,24 @@ architecture rtl of iunv is
 
   type pipeline_ctrl_lanes_type is array (lanes'range) of pipeline_ctrl_type;
   type pipeline_ctrl_lanes_type_ecc is array (lanes'range) of pipeline_ctrl_type_ecc;
+
+  function wordx_lanes_has_error(wordxlanes : wordx_lanes_type_ecc; ctrl : pipeline_ctrl_lanes_type_ecc) return boolean is
+    variable res : boolean := FALSE;
+  begin
+    for i in lanes'range loop
+      res := res or (hamming_has_error(wordxlanes(i)) and ctrl(i).valid(0) = '1');
+    end loop;
+    return res;
+  end;
+
+  function pipeline_ctrl_lanes_has_error(pipe : pipeline_ctrl_lanes_type_ecc) return boolean is
+    variable res : boolean := FALSE;
+  begin
+    for i in lanes'range loop
+      res := res or (pipeline_ctrl_has_error(pipe(i)) and pipe(i).valid(0) = '1');
+    end loop;
+    return res;
+  end;
 
   
   function to_pipeline_ctrl_lanes_type_ecc(pipe : pipeline_ctrl_lanes_type) return pipeline_ctrl_lanes_type_ecc is
@@ -930,24 +1011,6 @@ architecture rtl of iunv is
       res(i).fpu        := pipe(i).fpu;                  -- FPU issue ID
       res(i).fpu_flush  := pipe(i).fpu_flush;               -- FPU instruction has been flushed
     end loop;
-    return res;
-  end;
-
-  function to_nv_ras_in_type(ras_ecc : nv_ras_in_type_ecc) return nv_ras_in_type is
-    variable res : nv_ras_in_type;
-  begin
-    res.push    := ras_ecc.push(0);
-    res.pop     := ras_ecc.pop(0);
-    res.wdata   := wordx(get_data(ras_ecc.wdata));
-    res.flush   := ras_ecc.flush(0);
-    return res;
-  end;
-
-  function to_nv_ras_out_type(ras_ecc : nv_ras_out_type_ecc) return nv_ras_out_type is
-    variable res : nv_ras_out_type;
-  begin
-    res.rdata   := wordx(get_data(ras_ecc.rdata));
-    res.hit   := ras_ecc.hit(0);
     return res;
   end;
 
@@ -1023,15 +1086,30 @@ architecture rtl of iunv is
     csr         : csr_type_ecc;                  -- CSR information
     rfa1        : rfa_lanes_type_ecc;            -- register file record for op1
     rfa2        : rfa_lanes_type_ecc;            -- register file record for op2
-    immv        : lanes_type_ecc;                -- immediate as a valid operand flags
+    immv        : lanes_type_tmr;                -- immediate as a valid operand flags
     imm         : wordx_lanes_type_ecc;          -- immediate operands
-    pcv         : lanes_type_ecc;                -- program counter as a valid operand flags
+    pcv         : lanes_type_tmr;                -- program counter as a valid operand flags
     swap        : std_ulogic_vector(2 downto 0);                -- instructions are swapped in lanes
-    raso        : nv_ras_out_type_ecc;           -- RAS record
-    rasi        : nv_ras_in_type_ecc;            -- speculative RAS record
+    raso        : nv_ras_out_type;           -- RAS record
+    rasi        : nv_ras_in_type;            -- speculative RAS record
     csrw_eq     : std_logic_vector(3 downto 0);  --related to csr write hold checks
-    lalu_pre    : lanes_type_ecc;                -- prechecked lalu
+    lalu_pre    : lanes_type_tmr;                -- prechecked lalu
+    error       : boolean;
   end record;
+
+  function regacc_has_error(regacc : regacc_reg_type) return boolean is
+  begin
+      return  pipeline_ctrl_lanes_has_error(regacc.ctrl) or
+              csr_has_error(regacc.csr) or
+              rfa_lanes_has_error(regacc.rfa1) or
+              rfa_lanes_has_error(regacc.rfa2) or
+              tmr_vector_has_error(std_ulogic_vector(regacc.immv(0)), std_ulogic_vector(regacc.immv(1)), std_ulogic_vector(regacc.immv(2))) or
+              (wordx_lanes_has_error(regacc.imm, regacc.ctrl)) or
+              tmr_vector_has_error(std_ulogic_vector(regacc.pcv(0)), std_ulogic_vector(regacc.pcv(1)), std_ulogic_vector(regacc.pcv(2))) or
+              tmr_has_error(regacc.swap(0), regacc.swap(1), regacc.swap(2)) or
+              tmr_has_error(regacc.csrw_eq(0), regacc.csrw_eq(1), regacc.csrw_eq(2)) or
+              tmr_vector_has_error(std_ulogic_vector(regacc.lalu_pre(0)), std_ulogic_vector(regacc.lalu_pre(1)), std_ulogic_vector(regacc.lalu_pre(2)));
+  end;
 
 
   -- ALU Inputs --------------------------------------------------------------
@@ -1366,13 +1444,13 @@ architecture rtl of iunv is
     v.a.rfa1                    := (others => (others => '0'));
     v.a.rfa2                    := (others => (others => '0'));
     v.a.imm                     := (others => (others => '0'));
-    v.a.immv                    := (others => '0');
-    v.a.pcv                     := (others => '0');
+    v.a.immv                    := (others => (others => '0'));
+    v.a.pcv                     := (others => (others => '0'));
     v.a.swap                    := (others => '0');
-    v.a.raso                    := nv_ras_out_none_ecc;
-    v.a.rasi                    := nv_ras_in_none_ecc;
+    v.a.raso                    := nv_ras_out_none;
+    v.a.rasi                    := nv_ras_in_none;
     v.a.csrw_eq                 := (others => '0');
-    v.a.lalu_pre                := (others => '0');
+    v.a.lalu_pre                := (others => (others => '0'));
     -- Execute Stage
     v.e.ctrl                    := (others => pipeline_ctrl_none);
     v.e.csr                     := csr_none;
@@ -3842,7 +3920,7 @@ architecture rtl of iunv is
 
 
     -- First Stage Mux for Op1
-    if r.a.pcv(lane) = '1' then
+    if r.a.pcv(lane)(0) = '1' then
       mux_output_op1     := pc2xlen(word(get_data(r.a.ctrl(lane).pc)));
     elsif xc_forw_op1 = "10" then
       if v_fusel_eq(r, x, 0, LD) then
@@ -3883,7 +3961,7 @@ architecture rtl of iunv is
 
     -- Second Stage Mux for Op1
     if xc_forw_op1(1) = '1' or mem_forw_op1(1) = '1' or
-       wb_forw_op1(1) = '1' or r.a.pcv(lane)   = '1' then
+       wb_forw_op1(1) = '1' or r.a.pcv(lane)(0)   = '1' then
       op1                := mux_output_op1;
     elsif single_issue = 0 and
           ex_forw_op1 = "11" then
@@ -3896,7 +3974,7 @@ architecture rtl of iunv is
 
     -- First Stage Mux for Op2
       -- True even with zimm, but do not forward imm generated fron Branch.
-    if get_data(r.a.immv)(lane) = '1' and std_logic_vector(get_data(r.a.ctrl(lane).inst)(6 downto 0)) /= OP_BRANCH then
+    if r.a.immv(0)(lane) = '1' and std_logic_vector(get_data(r.a.ctrl(lane).inst)(6 downto 0)) /= OP_BRANCH then
       mux_output_op2     := word(get_data(r.a.imm(lane)));
     elsif xc_forw_op2 = "10" then
       if v_fusel_eq(r, x, 0, LD) then
@@ -3937,7 +4015,7 @@ architecture rtl of iunv is
 
     -- Second Stage Mux for Op2
     if xc_forw_op2(1) = '1' or mem_forw_op2(1) = '1' or wb_forw_op2(1) = '1' or
-       (r.a.immv(lane) = '1' and std_logic_vector(get_data(r.a.ctrl(lane).inst)(6 downto 0)) /= OP_BRANCH) then
+       (r.a.immv(0)(lane) = '1' and std_logic_vector(get_data(r.a.ctrl(lane).inst)(6 downto 0)) /= OP_BRANCH) then
       op2                := mux_output_op2;
     elsif single_issue = 0 and
           ex_forw_op2 = "11" then
@@ -7096,7 +7174,7 @@ architecture rtl of iunv is
   begin
     -- Faults detection 
     if fault_protection = 1 then
-      if hamming_has_error(r.f.pc) or r.f.valid(0) /= r.f.valid(1) or r.f.valid(0) /= r.f.valid(2) or r.f.valid(1) /= r.f.valid(2) then
+      if hamming_has_error(r.f.pc) or tmr_has_error(r.f.valid(0), r.f.valid(1), r.f.valid(2)) then
         faults.f := TRUE;
         hold := '1';
       end if;
@@ -7104,7 +7182,10 @@ architecture rtl of iunv is
         faults.d := TRUE;
         hold := '1';
       end if;
-
+      if regacc_has_error(r.a) then
+        faults.a := TRUE;
+        hold := '1';
+      end if;
     end if;
     iu_fault    := faults;
     holdi       := hold;
@@ -8582,6 +8663,8 @@ begin
 
   begin
     v := r;
+
+    -- v.a.error := regacc_has_error(r.a);
 
 
     iustall := '0';
@@ -10084,8 +10167,8 @@ begin
       v.e.aluforw(one)    := ra_alu_forw(one);
     end if;
     v.e.stforw            := ra_stdata_forw;
-    v.e.raso              := to_nv_ras_out_type(r.a.raso);
-    v.e.rasi              := to_nv_ras_in_type(r.a.rasi);
+    v.e.raso              := r.a.raso;
+    v.e.rasi              := r.a.rasi;
 
 
     -- Instruction Control ------------------------------------------------
@@ -10441,7 +10524,7 @@ begin
                        r.csr.dfeaturesen.lalu_dis,
                        r.csr.dfeaturesen.dual_dis,
                        r.csr.dcsr.step,   -- in  : DCSR step
-                       lanes_type(get_data(r.a.lalu_pre)),      -- in  : Late ALUs from RA
+                       lanes_type(r.a.lalu_pre(0)),      -- in  : Late ALUs from RA
                        r.d.mexc(0),          -- in  : Fetch exception
                        rd(v, e, 0),       -- in  : rd register from RA
                        v.e.ctrl(0).rdv,   -- in  : Valid rd register from RA
@@ -10635,9 +10718,11 @@ begin
       de_rfa1_nmasked(i)  := de_rfa1_nmask(i);
       de_rfa2_nmasked(i)  := de_rfa2_nmask(i);
       v.a.imm(i)          := hamming_encode(std_ulogic_vector(de_imm(i)));
-      v.a.immv(i)         := de_imm_valid(i);
-      v.a.pcv(i)          := de_pc_valid(i);
-      v.a.lalu_pre(i)     := de_lalu_pre(i);
+      for j in lanes_type_tmr'range loop
+        v.a.immv(j)(i)         := de_imm_valid(i);
+        v.a.pcv(j)(i)          := de_pc_valid(i);
+        v.a.lalu_pre(j)(i)     := de_lalu_pre(i);
+      end loop;
       v.a.ctrl(i).mexc    := (others => de_inst_mexc(i));
     end loop;
     v.a.swap              := (others => (to_bit(single_issue = 0) and de_swap));
@@ -10663,9 +10748,11 @@ begin
         de_rfa1_nmasked(i)  := de_rfa1_nmask(1 - i);
         de_rfa2_nmasked(i)  := de_rfa2_nmask(1 - i);
         v.a.imm(i)          := hamming_encode(std_ulogic_vector(de_imm(1 - i)));
-        v.a.immv(i)         := de_imm_valid(1 - i);
-        v.a.pcv(i)          := de_pc_valid(1 - i);
-        v.a.lalu_pre(i)     := de_lalu_pre(1 - i);
+        for j in lanes_type_tmr'range loop
+          v.a.immv(j)(i)         := de_imm_valid(1 - i);
+          v.a.pcv(j)(i)          := de_pc_valid(1 - i);
+          v.a.lalu_pre(j)(i)     := de_lalu_pre(1 - i);
+        end loop;
         v_a_inst_no_buf(i)  := de_inst_no_buf(1 - i);
         v.a.ctrl(i).mexc    := (others => de_inst_mexc(1 - i));
       end loop;
@@ -10739,8 +10826,8 @@ begin
     de_raso.hit := '0';
 
     -- Return Address Stack Control ---------------------------------------
-    v.a.raso.hit   := (others => de_raso.hit);
-    v.a.raso.rdata := hamming_encode(std_ulogic_vector(de_raso.rdata));
+    v.a.raso.hit   := de_raso.hit;
+    v.a.raso.rdata := de_raso.rdata;
 
     branch_misc(v.a.ctrl(branch_lane),
                 de_bhto_taken(branch_lane),
@@ -10760,7 +10847,7 @@ begin
     v.a.ctrl(branch_lane).branch.addr  := hamming_encode(std_ulogic_vector(de_branch_addr));
     v.a.ctrl(branch_lane).branch.naddr := hamming_encode(std_ulogic_vector(de_branch_next));
     v.a.ctrl(branch_lane).branch.taken := (others => de_branch_taken);
-    v.a.ctrl(branch_lane).branch.dir   := hamming_encode(std_ulogic_vector(de_bhto_dir1));
+    v.a.ctrl(branch_lane).branch.dir   := de_bhto_dir1;
     v.a.ctrl(branch_lane).branch.hit   := (others => de_branch_hit);
 
     -- Invalid Second Instruction ----------------------------------------
