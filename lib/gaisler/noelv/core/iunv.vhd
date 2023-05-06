@@ -765,8 +765,8 @@ architecture rtl of iunv is
   begin
     for i in rd_src_type_ecc'range loop
       for j in lanes_type_tmr'range loop
-      res.rfa1(i)(j) := rd_vs_rv.rfa1(i);
-      res.rfa2(i)(j) := rd_vs_rv.rfa2(i);
+        res.rfa1(i)(j) := rd_vs_rv.rfa1(i);
+        res.rfa2(i)(j) := rd_vs_rv.rfa2(i);
       end loop;
     end loop;
     return res;
@@ -844,6 +844,29 @@ architecture rtl of iunv is
             hamming_has_error(pipe.tval) or
             hamming_has_error(pipe.fusel);
   end;
+  function pipeline_ctrl_fix_error(pipe : pipeline_ctrl_type_ecc) return pipeline_ctrl_type_ecc is
+    variable res : pipeline_ctrl_type_ecc := pipe;
+  begin
+    res.pc            := hamming_encode(hamming_decode(pipe.pc));
+    res.inst          := hamming_encode(hamming_decode(pipe.inst));
+    res.cinst         := hamming_encode(hamming_decode(pipe.cinst));
+    res.valid         := (others => tmr_voter(pipe.valid(0), pipe.valid(1), pipe.valid(2)));
+    res.comp          := (others => tmr_voter(pipe.comp(0), pipe.comp(1), pipe.comp(2)));
+    res.branch.valid  := (others => tmr_voter(res.branch.valid(0), res.branch.valid(1), res.branch.valid(2)));
+    res.branch.addr   := hamming_encode(hamming_decode(pipe.branch.addr));
+    res.branch.naddr  := hamming_encode(hamming_decode(pipe.branch.naddr));
+    res.branch.taken  := (others => tmr_voter(res.branch.taken(0), res.branch.taken(1), res.branch.taken(2)));
+    res.branch.hit    := (others => tmr_voter(res.branch.hit(0), res.branch.hit(1), res.branch.hit(2)));
+    res.branch.mpred  := (others => tmr_voter(res.branch.mpred(0), res.branch.mpred(1), res.branch.mpred(2)));
+    res.rdv  := (others => tmr_voter(res.rdv(0), res.rdv(1), res.rdv(2)));
+    res.csrv  := (others => tmr_voter(res.csrv(0), res.csrv(1), res.csrv(2)));
+    res.csrdo  := (others => tmr_voter(res.csrdo(0), res.csrdo(1), res.csrdo(2)));
+    res.cause  := hamming_encode(hamming_decode(pipe.cause));
+    res.tval  := hamming_encode(hamming_decode(pipe.tval));
+    res.fusel  := hamming_encode(hamming_decode(pipe.fusel));
+--TODO
+    return res;
+  end;
 
   constant pipeline_ctrl_none   : pipeline_ctrl_type := (
     pc          => PC_RESET,
@@ -913,6 +936,17 @@ architecture rtl of iunv is
             hamming_has_error(csr.category) or
             hamming_has_error(csr.ctrl) or
             hamming_has_error(csr.v);
+  end;
+  
+  function csr_fix_error(csr : csr_type_ecc) return csr_type_ecc is
+    variable res : csr_type_ecc := csr;
+  begin
+    res.r := (others => tmr_voter(csr.r(0), csr.r(1), csr.r(2)));
+    res.w := (others => tmr_voter(csr.w(0), csr.w(1), csr.w(2)));
+    res.category  := hamming_encode(hamming_decode(csr.category));
+    res.ctrl      := hamming_encode(hamming_decode(csr.ctrl));
+    res.v         := hamming_encode(hamming_decode(csr.v));
+    return res;
   end;
   
   function to_csr_type(csr : csr_type_ecc) return csr_type is
@@ -11669,12 +11703,10 @@ begin
 
       if ic_fault.d = TRUE then
         v.d.pc        := hamming_encode(hamming_decode(r.d.pc));
-        v.d.inst      := r.d.inst;
         v.d.buff      := r.d.buff;
         v.d.valid     := (others => tmr_voter(r.d.valid(0), r.d.valid(1), r.d.valid(2)));
         v.d.xc        := r.d.xc;
         v.d.cause     := r.d.cause;
-        v.d.inst      := r.d.inst;
 
         for i in r.d.inst'range loop
           v.d.inst(i) := hamming_encode(hamming_decode(v.d.inst(i)));
@@ -11697,7 +11729,28 @@ begin
         v.d := r.d;
       end if;
 
-      v.a := r.a;
+      if ic_fault.a = TRUE then
+        v.a := r.a;
+
+        for i in lanes'range loop
+          v.a.ctrl(i)      := pipeline_ctrl_fix_error(v.a.ctrl(i));
+        end loop;
+        v.a.csr := csr_fix_error(v.a.csr);
+        v.a.immv  := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.a.immv(0)), std_ulogic_vector(v.a.immv(1)), std_ulogic_vector(v.a.immv(2)))));
+        for i in lanes'range loop
+          v.a.rfa1(i):= hamming_encode(hamming_decode(v.a.rfa1(i)));
+          v.a.rfa2(i):= hamming_encode(hamming_decode(v.a.rfa2(i)));
+          v.a.imm(i) := hamming_encode(hamming_decode(v.a.imm(i)));
+        end loop;
+        v.a.immv  := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.a.lalu_pre(0)), std_ulogic_vector(v.a.lalu_pre(1)), std_ulogic_vector(v.a.lalu_pre(2)))));
+        v.a.pcv   := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.a.pcv(0)), std_ulogic_vector(v.a.pcv(1)), std_ulogic_vector(v.a.pcv(2)))));
+        v.a.swap        := (others => (tmr_voter(v.a.swap(0), v.a.swap(1), v.a.swap(2))));
+        v.a.csrw_eq     := (others => (tmr_voter(v.a.csrw_eq(0), v.a.csrw_eq(1), v.a.csrw_eq(2))));
+        v.a.lalu_pre    := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.a.lalu_pre(0)), std_ulogic_vector(v.a.lalu_pre(1)), std_ulogic_vector(v.a.lalu_pre(2)))));
+      else
+        v.a := r.a;
+      end if;
+
       -- Bubbles in Execute Stage
       for i in lanes'range loop
         v.e.ctrl(i).valid := '0';
