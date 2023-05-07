@@ -741,14 +741,16 @@ architecture rtl of iunv is
     rfa2        : rd_src_type_ecc;
   end record;
 
-  -- function rd_vs_rs_has_error(rd_vs_rs : rd_vs_rs_type_ecc) return boolean is
-  --   variable res : boolean := FALSE;
-  -- begin
-  --   for i in rd_src_type_ecc'range loop
-  --     res := res or hamming_has_error(rd_vs_rs.rfa1(i)) or hamming_has_error(rd_vs_rs.rfa2(i));
-  --   end loop;
-  --   return res;
-  -- end;
+  function rd_vs_rs_has_error(rd_vs_rs : rd_vs_rs_type_ecc) return boolean is
+    variable res : boolean := FALSE;
+  begin
+    for i in rd_src_type_ecc'range loop
+      res := res or 
+              tmr_vector_has_error(std_ulogic_vector(rd_vs_rs.rfa1(i)(0)), std_ulogic_vector(rd_vs_rs.rfa1(i)(1)), std_ulogic_vector(rd_vs_rs.rfa1(i)(2))) or 
+              tmr_vector_has_error(std_ulogic_vector(rd_vs_rs.rfa2(i)(0)), std_ulogic_vector(rd_vs_rs.rfa2(i)(1)), std_ulogic_vector(rd_vs_rs.rfa2(i)(2)));
+    end loop;
+    return res;
+  end;
 
   function to_rd_vs_rs_type(rd_vs_rv : rd_vs_rs_type_ecc) return rd_vs_rs_type is
     variable res : rd_vs_rs_type;
@@ -810,20 +812,20 @@ architecture rtl of iunv is
     pc          : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);                       -- program counter
     inst        : ecc_vector(WORD_ECC_RANGE.left downto WORD_ECC_RANGE.right);                         -- instruction
     cinst       : ecc_vector(WORD16_ECC_RANGE.left downto WORD16_ECC_RANGE.right);                       -- compressed instruction
-    valid       : std_ulogic_vector(2 downto 0);                   -- instruction is valid
-    comp        : std_ulogic_vector(2 downto 0);                   -- instruction is compressed
-    branch      : branch_type_ecc;                  -- branch record
-    rdv         : std_ulogic_vector(2 downto 0);                   -- destination register is valid
-    rd_vs_rs    : rd_vs_rs_type_ecc;                -- pre-checked forwarding
-    csrv        : std_ulogic_vector(2 downto 0);                   -- instruction is a CSR one
-    csrdo       : std_ulogic_vector(2 downto 0);                   -- read only CSR
-    xc          : std_ulogic_vector(2 downto 0);                   -- exception/trap
-    mexc        : std_ulogic_vector(2 downto 0);                   -- inst memory excp
-    cause       : cause_type_ecc;                   -- exception/trap cause
+    valid       : std_ulogic_vector(2 downto 0);                    -- instruction is valid
+    comp        : std_ulogic_vector(2 downto 0);                    -- instruction is compressed
+    branch      : branch_type_ecc;                                  -- branch record
+    rdv         : std_ulogic_vector(2 downto 0);                    -- destination register is valid
+    rd_vs_rs    : rd_vs_rs_type_ecc;                                -- pre-checked forwarding
+    csrv        : std_ulogic_vector(2 downto 0);                    -- instruction is a CSR one
+    csrdo       : std_ulogic_vector(2 downto 0);                    -- read only CSR
+    xc          : std_ulogic_vector(2 downto 0);                    -- exception/trap
+    mexc        : std_ulogic_vector(2 downto 0);                    -- inst memory excp
+    cause       : cause_type_ecc;                                   -- exception/trap cause
     tval        : ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);                        -- exception/trap value
-    fusel       : fuseltype_ecc;                    -- assigned functional unit
-    fpu         : fpu_id;                       -- FPU issue ID
-    fpu_flush   : std_ulogic;                   -- FPU instruction has been flushed
+    fusel       : fuseltype_ecc;                                    -- assigned functional unit
+    fpu         : fpu_id;                                           -- FPU issue ID
+    fpu_flush   : std_ulogic;                                       -- FPU instruction has been flushed
   end record;
   
   function pipeline_ctrl_has_error(pipe : pipeline_ctrl_type_ecc) return boolean is
@@ -834,10 +836,10 @@ architecture rtl of iunv is
             tmr_has_error(pipe.valid(0), pipe.valid(1), pipe.valid(2)) or
             tmr_has_error(pipe.comp(0), pipe.comp(1), pipe.comp(2)) or
             branch_has_error(pipe.branch) or
-            -- tmr_has_error(pipe.rdv(0), pipe.rdv(1), pipe.rdv(2)) or
-            -- rd_vs_rs_has_error(pipe.rd_vs_rs) or
-            -- tmr_has_error(pipe.csrv(0), pipe.csrv(1), pipe.csrv(2)) or
-            -- tmr_has_error(pipe.csrdo(0), pipe.csrdo(1), pipe.csrdo(2)) or
+            tmr_has_error(pipe.rdv(0), pipe.rdv(1), pipe.rdv(2)) or
+            rd_vs_rs_has_error(pipe.rd_vs_rs) or
+            tmr_has_error(pipe.csrv(0), pipe.csrv(1), pipe.csrv(2)) or
+            tmr_has_error(pipe.csrdo(0), pipe.csrdo(1), pipe.csrdo(2)) or
             tmr_has_error(pipe.xc(0), pipe.xc(1), pipe.xc(2)) or
             tmr_has_error(pipe.mexc(0), pipe.mexc(1), pipe.mexc(2)) or
             hamming_has_error(pipe.cause) or
@@ -852,18 +854,20 @@ architecture rtl of iunv is
     res.cinst         := hamming_encode(hamming_decode(pipe.cinst));
     res.valid         := (others => tmr_voter(pipe.valid(0), pipe.valid(1), pipe.valid(2)));
     res.comp          := (others => tmr_voter(pipe.comp(0), pipe.comp(1), pipe.comp(2)));
-    res.branch.valid  := (others => tmr_voter(res.branch.valid(0), res.branch.valid(1), res.branch.valid(2)));
+    res.branch.valid  := (others => tmr_voter(pipe.branch.valid(0), pipe.branch.valid(1), pipe.branch.valid(2)));
     res.branch.addr   := hamming_encode(hamming_decode(pipe.branch.addr));
     res.branch.naddr  := hamming_encode(hamming_decode(pipe.branch.naddr));
-    res.branch.taken  := (others => tmr_voter(res.branch.taken(0), res.branch.taken(1), res.branch.taken(2)));
-    res.branch.hit    := (others => tmr_voter(res.branch.hit(0), res.branch.hit(1), res.branch.hit(2)));
-    res.branch.mpred  := (others => tmr_voter(res.branch.mpred(0), res.branch.mpred(1), res.branch.mpred(2)));
-    res.rdv  := (others => tmr_voter(res.rdv(0), res.rdv(1), res.rdv(2)));
-    res.csrv  := (others => tmr_voter(res.csrv(0), res.csrv(1), res.csrv(2)));
-    res.csrdo  := (others => tmr_voter(res.csrdo(0), res.csrdo(1), res.csrdo(2)));
-    res.cause  := hamming_encode(hamming_decode(pipe.cause));
-    res.tval  := hamming_encode(hamming_decode(pipe.tval));
-    res.fusel  := hamming_encode(hamming_decode(pipe.fusel));
+    res.branch.taken  := (others => tmr_voter(pipe.branch.taken(0), pipe.branch.taken(1), pipe.branch.taken(2)));
+    res.branch.hit    := (others => tmr_voter(pipe.branch.hit(0), pipe.branch.hit(1), pipe.branch.hit(2)));
+    res.branch.mpred  := (others => tmr_voter(pipe.branch.mpred(0), pipe.branch.mpred(1), pipe.branch.mpred(2)));
+    res.rdv           := (others => tmr_voter(pipe.rdv(0), pipe.rdv(1), pipe.rdv(2)));
+    res.csrv          := (others => tmr_voter(pipe.csrv(0), pipe.csrv(1), pipe.csrv(2)));
+    res.csrdo         := (others => tmr_voter(pipe.csrdo(0), pipe.csrdo(1), pipe.csrdo(2)));
+    res.xc            := (others => tmr_voter(pipe.xc(0), pipe.xc(1), pipe.xc(2)));
+    res.mexc          := (others => tmr_voter(pipe.mexc(0), pipe.mexc(1), pipe.mexc(2)));
+    res.cause         := hamming_encode(hamming_decode(pipe.cause));
+    res.tval          := hamming_encode(hamming_decode(pipe.tval));
+    res.fusel         := hamming_encode(hamming_decode(pipe.fusel));
 --TODO
     return res;
   end;
@@ -8698,7 +8702,7 @@ begin
   begin
     v := r;
 
-    -- v.a.error := regacc_has_error(r.a);
+    v.a.error := regacc_has_error(r.a);
 
 
     iustall := '0';
@@ -11733,20 +11737,20 @@ begin
         v.a := r.a;
 
         for i in lanes'range loop
-          v.a.ctrl(i)      := pipeline_ctrl_fix_error(v.a.ctrl(i));
+          v.a.ctrl(i)     := pipeline_ctrl_fix_error(r.a.ctrl(i));
         end loop;
-        v.a.csr := csr_fix_error(v.a.csr);
-        v.a.immv  := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.a.immv(0)), std_ulogic_vector(v.a.immv(1)), std_ulogic_vector(v.a.immv(2)))));
+        v.a.csr         := csr_fix_error(r.a.csr);
+        -- v.a.immv        := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(r.a.immv(0)), std_ulogic_vector(r.a.immv(1)), std_ulogic_vector(r.a.immv(2)))));
         for i in lanes'range loop
-          v.a.rfa1(i):= hamming_encode(hamming_decode(v.a.rfa1(i)));
-          v.a.rfa2(i):= hamming_encode(hamming_decode(v.a.rfa2(i)));
-          v.a.imm(i) := hamming_encode(hamming_decode(v.a.imm(i)));
+          v.a.rfa1(i)     := hamming_encode(hamming_decode(r.a.rfa1(i)));
+          v.a.rfa2(i)     := hamming_encode(hamming_decode(r.a.rfa2(i)));
+          v.a.imm(i)      := hamming_encode(hamming_decode(r.a.imm(i)));
         end loop;
-        v.a.immv  := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.a.lalu_pre(0)), std_ulogic_vector(v.a.lalu_pre(1)), std_ulogic_vector(v.a.lalu_pre(2)))));
-        v.a.pcv   := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.a.pcv(0)), std_ulogic_vector(v.a.pcv(1)), std_ulogic_vector(v.a.pcv(2)))));
-        v.a.swap        := (others => (tmr_voter(v.a.swap(0), v.a.swap(1), v.a.swap(2))));
-        v.a.csrw_eq     := (others => (tmr_voter(v.a.csrw_eq(0), v.a.csrw_eq(1), v.a.csrw_eq(2))));
-        v.a.lalu_pre    := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(v.a.lalu_pre(0)), std_ulogic_vector(v.a.lalu_pre(1)), std_ulogic_vector(v.a.lalu_pre(2)))));
+        v.a.immv        := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(r.a.immv(0)), std_ulogic_vector(r.a.immv(1)), std_ulogic_vector(r.a.immv(2)))));
+        v.a.pcv         := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(r.a.pcv(0)), std_ulogic_vector(r.a.pcv(1)), std_ulogic_vector(r.a.pcv(2)))));
+        v.a.swap        := (others => (tmr_voter(r.a.swap(0), r.a.swap(1), r.a.swap(2))));
+        v.a.csrw_eq     := (others => (tmr_voter(r.a.csrw_eq(0), r.a.csrw_eq(1), r.a.csrw_eq(2))));
+        v.a.lalu_pre    := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(r.a.lalu_pre(0)), std_ulogic_vector(r.a.lalu_pre(1)), std_ulogic_vector(r.a.lalu_pre(2)))));
       else
         v.a := r.a;
       end if;
