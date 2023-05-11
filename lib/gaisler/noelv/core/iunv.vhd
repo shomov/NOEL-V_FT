@@ -1132,7 +1132,6 @@ architecture rtl of iunv is
     rasi        : nv_ras_in_type;            -- speculative RAS record
     csrw_eq     : std_logic_vector(3 downto 0);  --related to csr write hold checks
     lalu_pre    : lanes_type_tmr;                -- prechecked lalu
-    error       : boolean;
   end record;
 
   function regacc_has_error(regacc : regacc_reg_type) return boolean is
@@ -8702,8 +8701,6 @@ begin
   begin
     v := r;
 
-    v.a.error := regacc_has_error(r.a);
-
 
     iustall := '0';
 
@@ -11713,7 +11710,7 @@ begin
         v.d.cause     := r.d.cause;
 
         for i in r.d.inst'range loop
-          v.d.inst(i) := hamming_encode(hamming_decode(v.d.inst(i)));
+          v.d.inst(i) := hamming_encode(hamming_decode(r.d.inst(i)));
         end loop;
         
         v.d.buff := iqueue_fix_error(r.d.buff);
@@ -11740,7 +11737,6 @@ begin
           v.a.ctrl(i)     := pipeline_ctrl_fix_error(r.a.ctrl(i));
         end loop;
         v.a.csr         := csr_fix_error(r.a.csr);
-        -- v.a.immv        := (others => std_logic_vector(tmr_voter_vector(std_ulogic_vector(r.a.immv(0)), std_ulogic_vector(r.a.immv(1)), std_ulogic_vector(r.a.immv(2)))));
         for i in lanes'range loop
           v.a.rfa1(i)     := hamming_encode(hamming_decode(r.a.rfa1(i)));
           v.a.rfa2(i)     := hamming_encode(hamming_decode(r.a.rfa2(i)));
