@@ -1733,7 +1733,7 @@ architecture rtl of iunv is
   type registers_default is record
     f       : fetch_reg_type;
     d       : decode_reg_type;
-    a       : regacc_reg_type;
+    a       : regacc_reg_type_protect;
     e       : execute_reg_type;
     m       : memory_reg_type;
     x       : exception_reg_type;
@@ -1954,7 +1954,7 @@ architecture rtl of iunv is
   begin
     regs.f  := to_fetch_reg_type(r.f);
     regs.d  := to_decode_reg_type(r.d);
-    regs.a  := to_regacc_reg_type(r.a);
+    regs.a  := r.a;
     regs.e  := to_execute_reg_type(r.e);
     regs.m  := r.m;
     regs.x  := r.x;
@@ -9041,13 +9041,11 @@ begin
     variable itrace_in : itrace_in_type;
 
     variable regs : registers_default;
-    variable execute            : execute_reg_type;
 
 
   begin
     v := r;
     regs := to_registers_default(r);
-    execute := execute_parity_fix_error(v.e);
 
     
 
@@ -10602,10 +10600,10 @@ begin
       de_nullify   := '1';
     end if;
 
-    de_inst(0).d   := std_logic_vector(get_data(r.d.inst(0))(31 downto 0));
-    de_inst(0).dc  := std_logic_vector(get_data(r.d.inst(0))(15 downto 0));
-    de_inst(1).d   := std_logic_vector(get_data(r.d.inst(0))(63 downto 32));
-    de_inst(1).dc  := std_logic_vector(get_data(r.d.inst(0))(47 downto 32));
+    de_inst(0).d   := regs.d.inst(0)(31 downto 0);
+    de_inst(0).dc  := regs.d.inst(0)(15 downto 0);
+    de_inst(1).d   := regs.d.inst(0)(63 downto 32);
+    de_inst(1).dc  := regs.d.inst(0)(47 downto 32);
     de_inst(0).xc  := "000";
     de_inst(1).xc  := "000";
     de_inst(0).c   := '0';
@@ -10619,8 +10617,8 @@ begin
     -- RVC Aligner --------------------------------------------------------
     rvc_aligner(active_extensions,
                 de_inst,                      -- in  : Fetch Instructions
-                std_logic_vector(get_data(r.d.pc)),                       -- in  : Decode PC
-                r.d.valid(0),      -- in  : Valid Instructions
+                regs.d.pc,                       -- in  : Decode PC
+                regs.d.valid,      -- in  : Valid Instructions
                 not (r.csr.mstatus.fs = "00" or
                 (r.csr.v = '1' and r.csr.vsstatus.fs = "00")),
                 de_rvc_aligned,               -- out : Aligned Instructions
@@ -10645,14 +10643,14 @@ begin
       de_rvc_buffer_comp_ill := '0';
     end if;
 
-    de_ipc(0) := std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(0).lpc & '0';
-    de_ipc(1) := std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0';
+    de_ipc(0) := regs.d.pc(regs.d.pc'length-1 downto 3) & de_rvc_aligned(0).lpc & '0';
+    de_ipc(1) := regs.d.pc(regs.d.pc'length-1 downto 3) & de_rvc_aligned(1).lpc & '0';
 
     de_rvc_aligned(0).xc   := "000";
     de_rvc_aligned(1).xc   := "000";
-    if r.d.mexc(0) = '1' and r.d.valid(0) = '1' then
-      de_rvc_aligned(0).xc := r.d.exchyper(0) & r.d.exctype(0) & '1';
-      de_rvc_aligned(1).xc := r.d.exchyper(0) & r.d.exctype(0) & '1';
+    if regs.d.mexc = '1' and regs.d.valid = '1' then
+      de_rvc_aligned(0).xc := regs.d.exchyper & regs.d.exctype & '1';
+      de_rvc_aligned(1).xc := regs.d.exchyper & regs.d.exctype & '1';
     -- In case it is lsb of an unaligned instruction,
     -- make it valid to take the trap.
       de_rvc_valid(0)      := '1';
@@ -10672,17 +10670,17 @@ begin
     -- Save second instruction in case it is not issued.
     v.d.buff.inst       := to_iword_type_ecc(de_mux_instruction(1));
     v.d.buff.cinst      := hamming_encode(std_ulogic_vector(de_mux_cinstruction(1)));
-    v.d.buff.pc         := hamming_encode(std_ulogic_vector(to0x(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0')));
+    v.d.buff.pc         := hamming_encode(std_ulogic_vector(to0x(regs.d.pc(regs.d.pc'length-1 downto 3) & de_rvc_aligned(1).lpc & '0')));
     v.d.buff.comp       := (others => de_rvc_comp(1));
     v.d.buff.xc         := (others => de_rvc_illegal(1));
     v.d.buff.comp_ill   := (others => de_rvc_comp_ill(1));
 
     bjump_gen(active_extensions,
               de_inst,
-              to_iqueue_type(r.d.buff),
-              to_prediction_array_type(r.d.prediction),
-              r.d.valid(0),
-              std_logic_vector(get_data(r.d.pc)),
+              regs.d.buff,
+              regs.d.prediction,
+              regs.d.valid,
+              regs.d.pc,
               de_bjump_buff,
               de_bjump,
               de_btb_taken,
@@ -10757,60 +10755,60 @@ begin
 
     if de_rvc_buffer_first = '1' and single_issue = 0 then
       if de_rvc_aligned(0).lpc = "10" then
-        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(2)).hit);
-        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(2)).taken);
+        v.d.buff.prediction.hit   := (others => regs.d.prediction(2).hit);
+        v.d.buff.prediction.taken := (others => regs.d.prediction(2).taken);
       elsif de_rvc_aligned(0).lpc = "11" then
-        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(3)).hit);
-        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(3)).taken);
+        v.d.buff.prediction.hit   := (others => regs.d.prediction(3).hit);
+        v.d.buff.prediction.taken := (others => regs.d.prediction(3).taken);
       end if;
     end if;
 
     if de_rvc_buffer_sec = '1' and single_issue = 0 then
       if de_rvc_aligned(1).lpc = "01" then
-        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(1)).hit);
-        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(1)).taken);
+        v.d.buff.prediction.hit   := (others => regs.d.prediction(1).hit);
+        v.d.buff.prediction.taken := (others => regs.d.prediction(1).taken);
       elsif de_rvc_aligned(1).lpc = "10" then
-        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(2)).hit);
-        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(2)).taken);
+        v.d.buff.prediction.hit   := (others => regs.d.prediction(2).hit);
+        v.d.buff.prediction.taken := (others => regs.d.prediction(2).taken);
       elsif de_rvc_aligned(1).lpc = "11" then
-        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(3)).hit);
-        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(3)).taken);
+        v.d.buff.prediction.hit   := (others => regs.d.prediction(3).hit);
+        v.d.buff.prediction.taken := (others => regs.d.prediction(3).taken);
       end if;
     end if;
 
     if de_rvc_buffer_third = '1' and single_issue = 0 then
       if de_rvc_buffer_inst.lpc = "10" then
-        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(2)).hit);
-        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(2)).taken);
+        v.d.buff.prediction.hit   := (others => regs.d.prediction(2).hit);
+        v.d.buff.prediction.taken := (others => regs.d.prediction(2).taken);
       elsif de_rvc_buffer_inst.lpc = "11" then
-        v.d.buff.prediction.hit   := (others => to_prediction_type(r.d.prediction(3)).hit);
-        v.d.buff.prediction.taken := (others => to_prediction_type(r.d.prediction(3)).taken);
+        v.d.buff.prediction.hit   := (others => regs.d.prediction(3).hit);
+        v.d.buff.prediction.taken := (others => regs.d.prediction(3).taken);
       end if;
     end if;
 
-    de_rvc_bhto_taken(0)   := to_prediction_type(r.d.prediction(0)).taken;
-    de_rvc_btb_hit(0)      := to_prediction_type(r.d.prediction(0)).hit;
+    de_rvc_bhto_taken(0)   := regs.d.prediction(0).taken;
+    de_rvc_btb_hit(0)      := regs.d.prediction(0).hit;
     if de_rvc_aligned(0).lpc = "01" or ( single_issue /= 0 and de_rvc_aligned(0).lpc = "11" )then
-      de_rvc_bhto_taken(0) := to_prediction_type(r.d.prediction(1)).taken;
-      de_rvc_btb_hit(0)    := to_prediction_type(r.d.prediction(1)).hit;
+      de_rvc_bhto_taken(0) := regs.d.prediction(1).taken;
+      de_rvc_btb_hit(0)    := regs.d.prediction(1).hit;
     elsif de_rvc_aligned(0).lpc = "10" and single_issue = 0 then
-      de_rvc_bhto_taken(0) := to_prediction_type(r.d.prediction(2)).taken;
-      de_rvc_btb_hit(0)    := to_prediction_type(r.d.prediction(2)).hit;
+      de_rvc_bhto_taken(0) := regs.d.prediction(2).taken;
+      de_rvc_btb_hit(0)    := regs.d.prediction(2).hit;
     elsif de_rvc_aligned(0).lpc = "11" and single_issue = 0 then
-      de_rvc_bhto_taken(0) := to_prediction_type(r.d.prediction(3)).taken;
-      de_rvc_btb_hit(0)    := to_prediction_type(r.d.prediction(3)).hit;
+      de_rvc_bhto_taken(0) := regs.d.prediction(3).taken;
+      de_rvc_btb_hit(0)    := regs.d.prediction(3).hit;
     end if;
-    de_rvc_bhto_taken(1)   := to_prediction_type(r.d.prediction(0)).taken;
-    de_rvc_btb_hit(1)      := to_prediction_type(r.d.prediction(0)).hit;
+    de_rvc_bhto_taken(1)   := regs.d.prediction(0).taken;
+    de_rvc_btb_hit(1)      := regs.d.prediction(0).hit;
     if de_rvc_aligned(1).lpc = "01" then
-      de_rvc_bhto_taken(1) := to_prediction_type(r.d.prediction(1)).taken;
-      de_rvc_btb_hit(1)    := to_prediction_type(r.d.prediction(1)).hit;
+      de_rvc_bhto_taken(1) := regs.d.prediction(1).taken;
+      de_rvc_btb_hit(1)    := regs.d.prediction(1).hit;
     elsif de_rvc_aligned(1).lpc = "10" then
-      de_rvc_bhto_taken(1) := to_prediction_type(r.d.prediction(2)).taken;
-      de_rvc_btb_hit(1)    := to_prediction_type(r.d.prediction(2)).hit;
+      de_rvc_bhto_taken(1) := regs.d.prediction(2).taken;
+      de_rvc_btb_hit(1)    := regs.d.prediction(2).hit;
     elsif de_rvc_aligned(1).lpc = "11" then
-      de_rvc_bhto_taken(1) := to_prediction_type(r.d.prediction(3)).taken;
-      de_rvc_btb_hit(1)    := to_prediction_type(r.d.prediction(3)).hit;
+      de_rvc_bhto_taken(1) := regs.d.prediction(3).taken;
+      de_rvc_btb_hit(1)    := regs.d.prediction(3).hit;
     end if;
 
     if v.d.valid(0) = '1' then
@@ -10819,8 +10817,8 @@ begin
     end if;
 
     de_buff_inst_xc   := "000";
-    if r.d.unaligned(0) = '1' and r.d.mexc(0) = '1' then
-      de_buff_inst_xc := r.d.exchyper(0) & r.d.exctype(0) & '1';
+    if regs.d.unaligned = '1' and regs.d.mexc = '1' then
+      de_buff_inst_xc := regs.d.exchyper & regs.d.exctype & '1';
     end if;
 
     -- New instructions
@@ -10832,19 +10830,19 @@ begin
     de_comp          := de_rvc_comp;
     de_rvc_xc        := de_rvc_illegal;
     de_inst_no_buf   := "00";
-    de_inst_mexc     := r.d.mexc(0) & r.d.mexc(0);
+    de_inst_mexc     := regs.d.mexc & regs.d.mexc;
     de_inst_comp_ill := de_rvc_comp_ill;
     if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
       -- Only add one new instruction.
-      de_inst_xc_msb       := r.d.unaligned(0) and r.d.mexc(0);  -- Unaligned [31:16] exception
+      de_inst_xc_msb       := regs.d.unaligned and regs.d.mexc;  -- Unaligned [31:16] exception
       de_inst_mexc(0)      := de_inst_xc_msb;
       de_inst_buff(1)      := de_mux_instruction(0);
-      de_inst_buff(0)      := to_iword_type(r.d.buff.inst);
+      de_inst_buff(0)      := regs.d.buff.inst;
       de_inst_buff(0).xc   := de_buff_inst_xc;
       de_cinst_buff(1)     := de_mux_cinstruction(0);
-      de_cinst_buff(0)     := word16(get_data(r.d.buff.cinst));
+      de_cinst_buff(0)     := regs.d.buff.cinst;
       de_pc(1)             := de_ipc(0);
-      de_pc(0)             := std_logic_vector(get_data(r.d.buff.pc)(de_pc(0)'range));
+      de_pc(0)             := regs.d.buff.pc(de_pc(0)'range);
       de_inst_valid(1)     := de_rvc_valid(0);
       de_inst_valid(0)     := tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2));
       de_comp(1)           := de_rvc_comp(0);
@@ -10880,7 +10878,7 @@ begin
       v.d.buff.inst.d   := hamming_encode(std_ulogic_vector(de_rvc_buffer_inst_exp));
       v.d.buff.cinst    := hamming_encode(std_ulogic_vector(de_rvc_buffer_inst.dc));
       v.d.buff.comp     := (others => de_rvc_buffer_comp);
-      v.d.buff.pc       := hamming_encode(std_ulogic_vector(to0x(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_buffer_inst.lpc & '0')));
+      v.d.buff.pc       := hamming_encode(std_ulogic_vector(to0x(regs.d.pc(regs.d.pc'length-1 downto 3)) & de_rvc_buffer_inst.lpc & '0'));
       v.d.buff.comp_ill := (others => de_rvc_buffer_comp_ill);
     -- bufferin of [31:16] is done after the v.d.inst assigment
     end if;
@@ -10910,7 +10908,7 @@ begin
                        r.csr.dfeaturesen.dual_dis,
                        r.csr.dcsr.step,   -- in  : DCSR step
                        lanes_type(r.a.lalu_pre(0)),      -- in  : Late ALUs from RA
-                       r.d.mexc(0),          -- in  : Fetch exception
+                       regs.d.mexc,          -- in  : Fetch exception
                        rd(v, e, 0),       -- in  : rd register from RA
                        tmr_voter(v.e.ctrl(0).rdv(0), v.e.ctrl(0).rdv(1), v.e.ctrl(0).rdv(2)),   -- in  : Valid rd register from RA
                        rd(v, e, 1),       -- in  : rd register from RA
@@ -10934,7 +10932,7 @@ begin
 
     -- Instruction Queue Logic -------------------------------------------
     buffer_ic(active_extensions,
-              tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)),
+              regs.d.buff.valid,
               de_inst_valid,            -- in  : Instruction Valid from RVC Decoder
               de_rvc_valid,             -- in  : Instruction Decode Valid Signals
               de_rvc_buffer_third,      -- in  : Buffer third inst
@@ -10947,7 +10945,7 @@ begin
               v.d.buff.valid           -- out : Buffer valid
               );
 
-    if r.d.mexc(0) = '1' and r.d.valid(0) = '1' then
+    if regs.d.mexc = '1' and regs.d.valid = '1' then
       v.d.buff.valid := (others => '0');
     end if;
 
@@ -11038,9 +11036,9 @@ begin
       if de_inst_xc_msb = '1' then
         -- While fetching the second part of an unaligned instruction,
         -- the PC would be first 16 bytes for r.d.pc.
-        de_to_ra_tval(0)   := pc2xlen(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & "000");
+        de_to_ra_tval(0)   := pc2xlen(regs.d.pc(regs.d.pc'length-1 downto 3) & "000");
         if single_issue /= 0 then
-          de_to_ra_tval(0) := pc2xlen(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 2)) & "00");
+          de_to_ra_tval(0) := pc2xlen(regs.d.pc(regs.d.pc'length-1 downto 2) & "00");
         end if;
       end if;
     elsif de_inst_buff(1).xc(0) = '1' then
@@ -11057,15 +11055,15 @@ begin
       de_to_ra_tval(1)     := pc2xlen(de_pc(1));
     end if;
 
-    if r.d.mexc(0) = '1' and (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '0' or
-                           (tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and r.d.unaligned(0) = '1' 
-                                and r.d.mexc(0) = '1')) then
+    if (regs.d.mexc = '1' and regs.d.buff.valid = '0') or
+                           (regs.d.buff.valid = '1' and regs.d.unaligned = '1' 
+                                and regs.d.mexc = '1') then
       de_inst_valid(1) := '0';
     end if;
 
     -- inull icache after encountering an instruction memory exception
     mexc_inull   := '0';
-    if (r.d.mexc(0) = '1' and r.d.valid(0) = '1') then
+    if (regs.d.mexc = '1' and regs.d.valid = '1') then
       mexc_inull := '1';
     end if;
 
@@ -11078,7 +11076,7 @@ begin
       end if;
     end loop;
 
-    if r.d.was_xc(0) = '1' then
+    if regs.d.was_xc = '1' then
       de_to_ra_xc    := (others => '1');
       de_to_ra_cause := (others => XC_INST_ACCESS_FAULT);   -- To make sure NOP:ing is done in RA.
     end if;
@@ -11319,7 +11317,7 @@ begin
               end if;
             end if;
           end loop;
-          if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and 
+          if regs.d.buff.valid = '1' and 
               std_logic_vector(get_data(v.d.buff.pc)(2 downto 1)) = u2vec(i, 2) and single_issue = 0 then
             de_hold_pc  := '0';
             de_rvc_hold := '0';
@@ -11347,7 +11345,7 @@ begin
           end if;
         end loop;
       end if;
-      if de_btb_taken_buff = '1' and r.d.unaligned(0) = '1' then
+      if de_btb_taken_buff = '1' and regs.d.unaligned = '1' then
         v.d.buff.valid := (others => '0');
       end if;
     end if;
@@ -11362,7 +11360,7 @@ begin
     -- Prevent unneeded fetching when exception on instruction out of decode,
     -- or in ra, ex or mem.
     -- Remember exception from last cycle?
-    if r.d.was_xc(0) = '1' then
+    if regs.d.was_xc = '1' then
 --      de_inull := '1';
     end if;
     -- Flushing pipeline?
@@ -11395,10 +11393,10 @@ begin
 
     -- Generate Nullify for Instruction Cache -----------------------------
     f_pb_exec := to_bit((dmen = 1) and (r.x.rstate = dexec) and -- Execute from program buffer?
-                        (get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 7) = std_ulogic_vector(DPROGBUF(pctype'high downto 7))));
-    if (not rstn   or          -- Reset
+        (regs.f.pc(regs.f.pc'high downto 7) = DPROGBUF(regs.f.pc'high downto 7)));
+if (not rstn   or          -- Reset
         de_hold_pc or          -- Hold PC due to Instruction buffer, RVC alignment or dhalt
-        not r.f.valid(0) or       -- Inull during the first cycle after reset
+        not regs.f.valid or       -- Inull during the first cycle after reset
         f_pb_exec) = '1' then  -- Program buffer fetch
       de_inull := '1';
     end if;
@@ -11412,14 +11410,14 @@ begin
           if single_issue /= 0 then
             -- v.d.inst(0)(31 downto 0) := ico.data(i)(31 downto 0);
             v.d.inst(0) := hamming_encode(get_data(v.d.inst(0))(hamming_data_size(v.d.inst(0)'length)-1 downto 32) & std_ulogic_vector(ico.data(i)(31 downto 0)));
-            if get_data(r.f.pc)(2) = '1' then
+            if regs.f.pc(2) = '1' then
               -- v.d.inst(0)(31 downto 0) := ico.data(i)(63 downto 32);
               v.d.inst(0) := hamming_encode(get_data(v.d.inst(0))(hamming_data_size(v.d.inst(0)'length)-1 downto 32) & std_ulogic_vector(ico.data(i)(63 downto 32)));
             end if;
             if ico.mds = '0' then
               -- v.d.inst(0)(31 downto 0) := ico.data(i)(31 downto 0);
               v.d.inst(0) := hamming_encode(get_data(v.d.inst(0))(hamming_data_size(v.d.inst(0)'length)-1 downto 32) & std_ulogic_vector(ico.data(i)(31 downto 0)));
-              if get_data(r.d.pc)(2) = '1' then
+              if regs.d.pc(2) = '1' then
                 -- v.d.inst(0)(31 downto 0) := ico.data(i)(63 downto 32);
                 v.d.inst(0) := hamming_encode(get_data(v.d.inst(0))(hamming_data_size(v.d.inst(0)'length)-1 downto 32) & std_ulogic_vector(ico.data(i)(63 downto 32)));
               end if;
@@ -11439,7 +11437,7 @@ begin
         if single_issue /= 0 then
           -- v.d.inst(0)(31 downto 0) := dbgi.pbdata(31 downto 0);
           v.d.inst(0)   := hamming_encode(get_data(v.d.inst(0))(hamming_data_size(v.d.inst(0)'length)-1 downto 32) & std_ulogic_vector(dbgi.pbdata(31 downto 0)));
-          if get_data(r.f.pc)(2) = '1' then
+          if regs.f.pc(2) = '1' then
             -- v.d.inst(0)(31 downto 0) := dbgi.pbdata(63 downto 32);
             v.d.inst(0)   := hamming_encode(get_data(v.d.inst(0))(hamming_data_size(v.d.inst(0)'length)-1 downto 32) & std_ulogic_vector(dbgi.pbdata(63 downto 32)));
           end if;
@@ -11459,7 +11457,7 @@ begin
       v.d.buff.inst.d := hamming_encode(get_data(v.d.inst(0)(15 downto 0)) & get_data(v.d.buff.inst.d)(15 downto 0));
     end if;
 
-    if ico.mds = '0' and r.d.unaligned(0) = '1' and tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+    if ico.mds = '0' and regs.d.unaligned = '1' and regs.d.buff.valid = '1' then
       -- v.d.buff.inst.d(31 downto 16) := v.d.inst(0)(15 downto 0);
       v.d.buff.inst.d := hamming_encode(get_data(v.d.inst(0))(15 downto 0) & get_data(v.d.buff.inst.d)(15 downto 0));
     end if;
@@ -11469,39 +11467,39 @@ begin
 
     if de_rvc_hold = '1' then
       -- v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & std_logic_vector(de_rvc_npc)));
-      v.d.pc := hamming_encode(std_ulogic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3) & std_ulogic_vector(de_rvc_npc)));
+      v.d.pc := hamming_encode(std_ulogic_vector(regs.d.pc(regs.d.pc'length-1 downto 3)) & std_ulogic_vector(de_rvc_npc));
       if single_issue = 0 then
         if de_rvc_valid(1) = '1' and de_issue(1) = '0' then
-          v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
+          v.d.pc := hamming_encode(std_ulogic_vector(regs.d.pc(regs.d.pc'length-1 downto 3)) & std_ulogic_vector(de_rvc_aligned(1).lpc) & '0');
         end if;
-        if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' then
+        if regs.d.buff.valid = '1' then
           if de_rvc_valid(0) = '1' and de_issue(1) = '0' then
             v.d.pc := r.d.pc;
           elsif de_rvc_valid(0) = '1' and de_issue(1) = '1' then
-            v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
+            v.d.pc := hamming_encode(std_ulogic_vector(regs.d.pc(regs.d.pc'length-1 downto 3)) & std_ulogic_vector(de_rvc_aligned(1).lpc) & '0');
           end if;
         end if;
       end if;
       if single_issue /= 0 then
-        v.d.pc := hamming_encode(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 2) & "10");
+        v.d.pc := hamming_encode(std_ulogic_vector(regs.d.pc(regs.d.pc'length-1 downto 2)) & "10");
       end if;
     end if;
 
     if de_hold_pc = '1' then
-      if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '0' and single_issue = 0 then
+      if regs.d.buff.valid = '0' and single_issue = 0 then
         if de_rvc_buffer_third = '1' then
           if de_rvc_valid(1) = '1' and de_issue(1) = '0' then
-            v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
+            v.d.pc := hamming_encode(std_ulogic_vector(regs.d.pc(regs.d.pc'length-1 downto 3)) & std_ulogic_vector(de_rvc_aligned(1).lpc) & '0');
           end if;
         end if;
       end if;
 
-      if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and single_issue = 0 then
+      if regs.d.buff.valid = '1' and single_issue = 0 then
         if de_rvc_buffer_third = '1' then
           if de_issue(1) = '0' then
             v.d.pc := r.d.pc;
           else
-            v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
+            v.d.pc := hamming_encode(std_ulogic_vector(regs.d.pc(regs.d.pc'length-1 downto 3)) & std_ulogic_vector(de_rvc_aligned(1).lpc) & '0');
           end if;
 
           if v.d.valid(0) = '1' then
@@ -11509,7 +11507,7 @@ begin
               v.d.pc := r.d.pc;
             elsif de_rvc_valid(0)= '1' and de_issue(1) = '1' then
               -- If it is holding that means there is a valid instruction in lane 1
-              v.d.pc := hamming_encode(std_ulogic_vector(std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3)) & de_rvc_aligned(1).lpc & '0'));
+              v.d.pc := hamming_encode(std_ulogic_vector(regs.d.pc(regs.d.pc'length-1 downto 3)) & std_ulogic_vector(de_rvc_aligned(1).lpc) & '0');
             end if;
           end if;
         end if;
@@ -11520,16 +11518,16 @@ begin
         end if;
       end if;
 
-      if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and single_issue /= 0 then
+      if regs.d.buff.valid = '1' and single_issue /= 0 then
         v.d.pc := r.d.pc;
       end if;
     end if;
 
-    if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and v.d.valid(0) = '1' then
-      v.d.pc := hamming_encode(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 2) & "10");
+    if regs.d.buff.valid = '1' and v.d.valid(0) = '1' then
+      v.d.pc := hamming_encode(std_ulogic_vector(regs.f.pc(regs.f.pc'length-1 downto 2)) & "10");
     end if;
 
-    if r.f.valid(0) = '1' then
+    if regs.f.valid = '1' then
       v.d.valid := (others => '1');
     end if;
 
@@ -11556,7 +11554,7 @@ begin
               end if;
             end if;
           end loop;
-          if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and 
+          if regs.d.buff.valid = '1' and 
               std_logic_vector(get_data(v.d.buff.pc)(2 downto 1)) = u2vec(i, 2) and single_issue = 0 then
             v.d.valid := (others => '0');
           end if;
@@ -11569,12 +11567,12 @@ begin
       if de_bjump_buff = '0' then
         for i in 0 to 3 - (2 * single_issue) loop
           if de_bjump_pos(i) = '1' then
-            if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and 
+            if regs.d.buff.valid = '1' and 
                 std_logic_vector(get_data(v.d.buff.pc)(2 downto 1)) /= u2vec(i, 2) and single_issue = 0 then
               v.d.buff.valid := (others => '0');
             end if;
             if single_issue /= 0 then
-              if tmr_voter(r.d.buff.valid(0), r.d.buff.valid(1), r.d.buff.valid(2)) = '1' and 
+              if regs.d.buff.valid = '1' and 
                   std_logic_vector(get_data(v.d.buff.pc)(1 downto 1)) /= u2vec(i, 1) then
                 v.d.buff.valid := (others => '0');
               end if;
@@ -11590,8 +11588,8 @@ begin
 
     -- Valid Instruction for BTB
     de_btb_valid     := (others => '0');
-    if r.f.valid(0) = '1' then
-      r_f_pc_21 := word2(get_data(r.f.pc)(2 downto 1));
+    if regs.f.valid = '1' then
+      r_f_pc_21 := regs.f.pc(2 downto 1);
       case r_f_pc_21 is
         when "00" =>
           de_btb_valid := "1111";
@@ -11718,7 +11716,7 @@ begin
 
     -- Hierarchical Second Stage
     -- Exception Reset -----------------------------------------------------
-    if xc_rstn = '0' or r.f.valid(0) = '0' then
+    if xc_rstn = '0' or regs.f.valid = '0' then
       v.f.pc     := r.f.pc;
     -- Exception/Interrupt -------------------------------------------------
     elsif x_xc_taken = '1' then
@@ -11742,14 +11740,14 @@ begin
       v.f.pc     := hamming_encode(std_ulogic_vector(de_target));
     -- Incremental PC ------------------------------------------------------
     else
-      v.f.pc     := hamming_encode(std_ulogic_vector(npc(pctype(get_data(r.f.pc)))));
+      v.f.pc     := hamming_encode(std_ulogic_vector(npc(regs.f.pc)));
     end if;
 
     -- v.f.pc and next_pc must be decoupled in order to remove de_hold_pc from the
     -- address path.
     reread_pc   := '0';
-    if xc_rstn = '0' or r.f.valid(0) = '0' then
-      next_pc   := pctype(get_data(r.f.pc));
+    if xc_rstn = '0' or regs.f.valid = '0' then
+      next_pc   := regs.f.pc;
       reread_pc := '1';
     -- Exception/Interrupt -------------------------------------------------
     elsif x_xc_taken = '1' then
@@ -11770,7 +11768,7 @@ begin
       next_pc   := de_target;
     -- Incremental PC ------------------------------------------------------
     else
-      next_pc   := npc(pctype(get_data(r.f.pc)));
+      next_pc   := npc(regs.f.pc);
     end if;
 
 
@@ -11839,14 +11837,14 @@ begin
     bhti.iustall      <= iustall;
 
     -- To Branch Target Buffer ---------------------------------------------
-    btbi.raddr  <= pc2xlen(pctype(get_data(r.f.pc)));
+    btbi.raddr  <= pc2xlen(regs.f.pc);
 
     -- To ICache -----------------------------------------------------------
     ici.dpc                        <= (others => '0');
     ici.fpc                        <= (others => '0');
     ici.rpc                        <= (others => '0');
-    ici.dpc(hamming_data_size(r.d.pc'length)-1 downto 3)  <= std_logic_vector(get_data(r.d.pc)(hamming_data_size(r.d.pc'length)-1 downto 3));
-    ici.fpc(hamming_data_size(r.f.pc'length)-1 downto 3)  <= std_logic_vector(get_data(r.f.pc)(hamming_data_size(r.f.pc'length)-1 downto 3));
+    ici.dpc(regs.d.pc'length-1 downto 3)  <= regs.d.pc(regs.d.pc'length-1 downto 3);
+    ici.fpc(regs.f.pc'length-1 downto 3)  <= regs.f.pc(regs.f.pc'length-1 downto 3);
     ici.rpc(next_pc'high downto 3) <= next_pc(next_pc'high downto 3);
     ici.nostream                   <= reread_pc or r.csr.dfeaturesen.nostream;
 
@@ -12453,7 +12451,7 @@ begin
       dbgo.derr         <= dbg_derr;
       dbgo.dexec_done   <= dbg_dexec_done;
       dbgo.stoptime     <= dbg_stoptime;
-      dbgo.pbaddr       <= std_logic_vector(get_data(r.f.pc)(6 downto 2));
+      dbgo.pbaddr       <= regs.f.pc(6 downto 2);
       dbgo.mcycle       <= r.csr.mcycle(63 downto 0);
     else
       dbgo              <= nv_debug_out_none;
