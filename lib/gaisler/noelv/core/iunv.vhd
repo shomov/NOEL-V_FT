@@ -1733,7 +1733,7 @@ architecture rtl of iunv is
   type registers_default is record
     f       : fetch_reg_type;
     d       : decode_reg_type;
-    a       : regacc_reg_type_protect;
+    a       : regacc_reg_type;
     e       : execute_reg_type;
     m       : memory_reg_type;
     x       : exception_reg_type;
@@ -1954,7 +1954,7 @@ architecture rtl of iunv is
   begin
     regs.f  := to_fetch_reg_type(r.f);
     regs.d  := to_decode_reg_type(r.d);
-    regs.a  := r.a;
+    regs.a  := to_regacc_reg_type(r.a);
     regs.e  := to_execute_reg_type(r.e);
     regs.m  := r.m;
     regs.x  := r.x;
@@ -10429,14 +10429,14 @@ begin
 
     -- Insert Exception ---------------------------------------------------
     for i in lanes'range loop
-      ra_xc(i)               := r.a.ctrl(i).xc(0);
-      ra_xc_cause(i)         := cause_type(get_data(r.a.ctrl(i).cause));
-      ra_xc_tval(i)          := wordx(get_data(r.a.ctrl(i).tval));
+      ra_xc(i)               := regs.a.ctrl(i).xc;
+      ra_xc_cause(i)         := regs.a.ctrl(i).cause;
+      ra_xc_tval(i)          := regs.a.ctrl(i).tval;
     end loop;
-    if r.a.ctrl(csr_lane).xc(0) = '0' and ra_csr_read_xc = '1' then
+    if regs.a.ctrl(csr_lane).xc = '0' and ra_csr_read_xc = '1' then
       ra_xc(csr_lane)        := '1';
       ra_xc_cause(csr_lane)  := ra_csr_read_cause;
-      ra_xc_tval(csr_lane)   := to0x(word(get_data(r.a.ctrl(csr_lane).inst)));
+      ra_xc_tval(csr_lane)   := to0x(regs.a.ctrl(csr_lane).inst);
       if illegalTval0 = 1 then
         ra_xc_tval(csr_lane) := zerox;
       end if;
@@ -10445,10 +10445,10 @@ begin
     -- ALUs ---------------------------------------------------------------
     for i in lanes'range loop
       alu_gen(active_extensions,
-              word(get_data(r.a.ctrl(i).inst)),
+              regs.a.ctrl(i).inst,
               ra_alu_ctrl(i)              -- ALU Control Signal
               );
-      ra_alu_valid(i) := r.a.ctrl(i).valid(0) and to_bit(v_fusel_eq(fuseltype(get_data(r.a.ctrl(i).fusel)), ALU));
+      ra_alu_valid(i) := regs.a.ctrl(i).valid and to_bit(v_fusel_eq(regs.a.ctrl(i).fusel, ALU));
       a_alu_forwarding(r,                 -- in  : Registers
                        i,                 -- in  : Lane
                        v.m.result,        -- in  : Data from ALU L0/L1 (C)
@@ -10490,27 +10490,27 @@ begin
 
     -- To Execute Stage ---------------------------------------------------
     for i in lanes'range loop
-      v.e.ctrl(i).pc      := pctype(get_data(r.a.ctrl(i).pc));
-      v.e.ctrl(i).inst    := set_doubl_data(get_data(r.a.ctrl(i).inst));
-      v.e.ctrl(i).cinst   := word16(get_data(r.a.ctrl(i).cinst));
-      v.e.ctrl(i).valid   := (others => r.a.ctrl(i).valid(0) and not ra_flush);
-      v.e.ctrl(i).comp    := r.a.ctrl(i).comp(0);
-      v.e.ctrl(i).branch  := to_branch_type_parity(to_branch_type(r.a.ctrl(i).branch));
-      v.e.ctrl(i).rdv     := (others => r.a.ctrl(i).rdv(0));
-      v.e.ctrl(i).csrv    := (others => r.a.ctrl(i).csrv(0));
-      v.e.ctrl(i).csrdo   := r.a.ctrl(i).csrdo(0);
+      v.e.ctrl(i).pc      := regs.a.ctrl(i).pc;
+      v.e.ctrl(i).inst    := set_doubl_data(std_ulogic_vector(regs.a.ctrl(i).inst));
+      v.e.ctrl(i).cinst   := regs.a.ctrl(i).cinst;
+      v.e.ctrl(i).valid   := (others => regs.a.ctrl(i).valid and not ra_flush);
+      v.e.ctrl(i).comp    := regs.a.ctrl(i).comp;
+      v.e.ctrl(i).branch  := to_branch_type_parity(regs.a.ctrl(i).branch);
+      v.e.ctrl(i).rdv     := (others => regs.a.ctrl(i).rdv);
+      v.e.ctrl(i).csrv    := (others => regs.a.ctrl(i).csrv);
+      v.e.ctrl(i).csrdo   := regs.a.ctrl(i).csrdo;
       v.e.ctrl(i).xc      := (others => ra_xc(i));
       v.e.ctrl(i).cause   := ra_xc_cause(i);
       v.e.ctrl(i).tval    := ra_xc_tval(i);
-      v.e.ctrl(i).fusel   := set_doubl_data(get_data(r.a.ctrl(i).fusel));
-      v.e.ctrl(i).mexc    := r.a.ctrl(i).mexc(0);
-      v.e.rfa1(i)         := to_rfatype(r.a.rfa1(i));
-      v.e.rfa2(i)         := to_rfatype(r.a.rfa2(i));
+      v.e.ctrl(i).fusel   := set_doubl_data(std_ulogic_vector(regs.a.ctrl(i).fusel));
+      v.e.ctrl(i).mexc    := regs.a.ctrl(i).mexc;
+      v.e.rfa1(i)         := regs.a.rfa1(i);
+      v.e.rfa2(i)         := regs.a.rfa2(i);
       -- Some kind of fetch fault?
-      if r.a.ctrl(i).xc(0) = '1' and
-         (cause_type(get_data(r.a.ctrl(i).cause)) = XC_INST_ACCESS_FAULT    or
-          cause_type(get_data(r.a.ctrl(i).cause)) = XC_INST_INST_PAGE_FAULT or
-          cause_type(get_data(r.a.ctrl(i).cause)) = XC_INST_INST_G_PAGE_FAULT) then
+      if regs.a.ctrl(i).xc = '1' and
+         (regs.a.ctrl(i).cause = XC_INST_ACCESS_FAULT    or
+          regs.a.ctrl(i).cause = XC_INST_INST_PAGE_FAULT or
+          regs.a.ctrl(i).cause = XC_INST_INST_G_PAGE_FAULT) then
         -- Pass NOOP into the pipeline if there was a fetch fault.
         -- After this point no random instructions will be in the pipeline,
         -- but up to here it is necessary to check xc!
@@ -10523,7 +10523,7 @@ begin
         v.e.ctrl(i).fusel := set_doubl_data(std_ulogic_vector(NONE));
       end if;
     end loop;
-    v.e.ctrl(fpu_lane).fpu := r.a.ctrl(fpu_lane).fpu;
+    v.e.ctrl(fpu_lane).fpu := regs.a.ctrl(fpu_lane).fpu;
     if ext_f = 1 then
       -- This condition would have caused a hold in EX above!
       if r.e.fpu_wait = '1' and
@@ -10538,11 +10538,11 @@ begin
         end if;
       end if;
     end if;
-    v.e.csr               := to_csr_type(r.a.csr);
+    v.e.csr               := regs.a.csr;
     v.e.csr.v             := ra_csr;
-    v.e.swap              := r.a.swap(0);
+    v.e.swap              := regs.a.swap;
     v.e.stdata            := ra_stdata;
-    v.e.jimm              := wordx(get_data(r.a.imm(branch_lane)));
+    v.e.jimm              := regs.a.imm(branch_lane);
     v.e.jop1              := ra_jump_op1;
     v.e.jumpforw(branch_lane) := ra_jump_forw;
     v.e.aluforw(0)        := ra_alu_forw(0);
@@ -10550,8 +10550,8 @@ begin
       v.e.aluforw(one)    := ra_alu_forw(one);
     end if;
     v.e.stforw            := ra_stdata_forw;
-    v.e.raso              := r.a.raso;
-    v.e.rasi              := r.a.rasi;
+    v.e.raso              := regs.a.raso;
+    v.e.rasi              := regs.a.rasi;
 
 
     -- Instruction Control ------------------------------------------------
@@ -10907,7 +10907,7 @@ begin
                        r.csr.dfeaturesen.lalu_dis,
                        r.csr.dfeaturesen.dual_dis,
                        r.csr.dcsr.step,   -- in  : DCSR step
-                       lanes_type(r.a.lalu_pre(0)),      -- in  : Late ALUs from RA
+                       regs.a.lalu_pre,      -- in  : Late ALUs from RA
                        regs.d.mexc,          -- in  : Fetch exception
                        rd(v, e, 0),       -- in  : rd register from RA
                        tmr_voter(v.e.ctrl(0).rdv(0), v.e.ctrl(0).rdv(1), v.e.ctrl(0).rdv(2)),   -- in  : Valid rd register from RA
@@ -11068,7 +11068,7 @@ begin
     end if;
 
     for i in lanes'range loop
-      if (r.a.ctrl(i).mexc(0) = '1' and r.a.ctrl(i).valid(0) = '1') or
+      if (regs.a.ctrl(i).mexc = '1' and regs.a.ctrl(i).valid = '1') or
          (r.e.ctrl(i).mexc = '1' and tmr_voter(r.e.ctrl(i).valid(0), r.e.ctrl(i).valid(1), r.e.ctrl(i).valid(2)) = '1') or
          (r.m.ctrl(i).mexc = '1' and r.m.ctrl(i).valid = '1') then
         -- Exception is not included since the xc will annul the cache on that stage
@@ -11156,12 +11156,12 @@ begin
 
     -- Increase FPU issue ID
     if is_valid_fpu(v, a) then
-      v.a.ctrl(fpu_lane).fpu := uadd(r.a.ctrl(fpu_lane).fpu, 1);
+      v.a.ctrl(fpu_lane).fpu := uadd(regs.a.ctrl(fpu_lane).fpu, 1);
     end if;
 
     -- Related to CSR write hold checks in access stage
     v.a.csrw_eq := (others => '0');
-    if get_data(v.a.ctrl(csr_lane).inst)(31 downto 20) = get_data(r.a.ctrl(csr_lane).inst)(31 downto 20) then
+    if get_data(v.a.ctrl(csr_lane).inst)(31 downto 20) = std_ulogic_vector(regs.a.ctrl(csr_lane).inst(31 downto 20)) then
       if csr_ok(r,a) then
         v.a.csrw_eq(0) := '1';
       end if;
@@ -11969,10 +11969,10 @@ if (not rstn   or          -- Reset
     -- Speculative updating of FPU register dirty status
     -- It does not matter that we sometimes set dirty for instructions
     -- that are later nullified. This is allowed by the standard.
-    if (r.a.ctrl(fpu_lane).valid(0)    = '1' and r.a.ctrl(fpu_lane).xc(0) = '0' and
-        is_fpu_modify(word(get_data(r.a.ctrl(fpu_lane).inst)))) or
-       (r.a.ctrl(memory_lane).valid(0) = '1' and r.a.ctrl(memory_lane).xc(0) = '0' and
-        is_fpu_modify(word(get_data(r.a.ctrl(memory_lane).inst)))) then
+    if (regs.a.ctrl(fpu_lane).valid    = '1' and regs.a.ctrl(fpu_lane).xc = '0' and
+        is_fpu_modify(regs.a.ctrl(fpu_lane).inst)) or
+       (regs.a.ctrl(memory_lane).valid = '1' and regs.a.ctrl(memory_lane).xc = '0' and
+        is_fpu_modify(regs.a.ctrl(memory_lane).inst)) then
       v.csr.mstatus.fs    := "11";
       if r.csr.v = '1' then
         v.csr.vsstatus.fs := "11";
