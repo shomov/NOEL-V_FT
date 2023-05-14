@@ -164,7 +164,6 @@ package hamming_edac is
   --# Returns:
   --#   Data portion of Encoded_data.
   function get_data( Encoded_data : ecc_vector ) return std_ulogic_vector;
-  function get_raw_data( Encoded_data : ecc_vector ) return std_ulogic_vector;
 
   --## Extract parity portion from encoded ecc_vector.
   --# Args:
@@ -357,14 +356,6 @@ package body hamming_edac is
     variable result : std_ulogic_vector(Encoded_data'high downto 0);
   begin
     result := to_sulv(Encoded_data(Encoded_data'high downto 0));
-    return result;
-  end function;
-
-  --## Extract data portion from encoded ecc_vector
-  function get_raw_data( Encoded_data : ecc_vector ) return std_ulogic_vector is
-    variable result : std_ulogic_vector(hamming_data_size(Encoded_data'length)-1 downto 0);
-  begin
-    result := get_data(Encoded_data)(Encoded_data'high downto hamming_parity_size(Encoded_data'length));
     return result;
   end function;
 

@@ -118,6 +118,7 @@ use gaisler.noelvint.fpu_id;
 use gaisler.noelvint.reg_t;
 library shomov;
 use shomov.nmr_common.all;
+use shomov.parity_doubling.all;
 library extras;
 use extras.hamming_edac.all;
 
@@ -807,6 +808,26 @@ architecture rtl of iunv is
     fpu         : fpu_id;                       -- FPU issue ID
     fpu_flush   : std_ulogic;                   -- FPU instruction has been flushed
   end record;
+
+  type pipeline_ctrl_type_parity is record
+    pc          : pctype;                       -- program counter
+    inst        : doubling_vector(word'length*2-1 downto -1);                         -- instruction
+    cinst       : word16;                       -- compressed instruction
+    valid       : std_ulogic;                   -- instruction is valid
+    comp        : std_ulogic;                   -- instruction is compressed
+    branch      : branch_type;                  -- branch record
+    rdv         : std_ulogic;                   -- destination register is valid
+    rd_vs_rs    : rd_vs_rs_type;                -- pre-checked forwarding
+    csrv        : std_ulogic;                   -- instruction is a CSR one
+    csrdo       : std_ulogic;                   -- read only CSR
+    xc          : std_ulogic;                   -- exception/trap
+    mexc        : std_ulogic;                   -- inst memory excp
+    cause       : cause_type;                   -- exception/trap cause
+    tval        : wordx;                        -- exception/trap value
+    fusel       : fuseltype;                    -- assigned functional unit
+    fpu         : fpu_id;                       -- FPU issue ID
+    fpu_flush   : std_ulogic;                   -- FPU instruction has been flushed
+  end record;
   
   type pipeline_ctrl_type_ecc is record
     pc          : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);                       -- program counter
@@ -891,6 +912,25 @@ architecture rtl of iunv is
     fpu         => (others => '0'),
     fpu_flush   => '0'
     );
+    constant pipeline_ctrl_none_parity   : pipeline_ctrl_type_parity := (
+      pc          => PC_RESET,
+      inst        => set_doubl_data(std_ulogic_vector(zerow)),
+      cinst       => zerow16,
+      valid       => '0',
+      comp        => '0',
+      branch      => branch_none,
+      rdv         => '0',
+      rd_vs_rs    => rd_vs_rs_none,
+      csrv        => '0',
+      csrdo       => '0',
+      xc          => '0',
+      mexc        => '0',
+      cause       => (others => '0'),
+      tval        => zerox,
+      fusel       => NONE,
+      fpu         => (others => '0'),
+      fpu_flush   => '0'
+      );
 
     constant pipeline_ctrl_none_ecc   : pipeline_ctrl_type_ecc := (
       pc          => (others => '0'),
@@ -982,6 +1022,7 @@ architecture rtl of iunv is
 
   type pipeline_ctrl_lanes_type is array (lanes'range) of pipeline_ctrl_type;
   type pipeline_ctrl_lanes_type_ecc is array (lanes'range) of pipeline_ctrl_type_ecc;
+  type pipeline_ctrl_lanes_type_parity is array (lanes'range) of pipeline_ctrl_type_parity;
 
   function wordx_lanes_has_error(wordxlanes : wordx_lanes_type_ecc; ctrl : pipeline_ctrl_lanes_type_ecc) return boolean is
     variable res : boolean := FALSE;
@@ -1051,6 +1092,31 @@ architecture rtl of iunv is
     end loop;
     return res;
   end;
+  
+  function to_pipeline_ctrl_lanes_type(pipe : pipeline_ctrl_lanes_type_parity) return pipeline_ctrl_lanes_type is
+    variable res : pipeline_ctrl_lanes_type;
+  begin
+    for i in lanes'range loop
+      res(i).pc         := pipe(i).pc;      -- program counter
+      res(i).inst       := std_logic_vector(get_doubl_data(pipe(i).inst));    -- instruction
+      res(i).cinst      := pipe(i).cinst;   -- compressed instruction
+      res(i).valid      := pipe(i).valid;       -- instruction is valid
+      res(i).comp       := pipe(i).comp;        -- instruction is compressed
+      res(i).branch     := pipe(i).branch;  -- branch record
+      res(i).rdv        := pipe(i).rdv;         -- destination register is valid
+      res(i).rd_vs_rs   := pipe(i).rd_vs_rs;-- pre-checked forwarding
+      res(i).csrv       := pipe(i).csrv;        -- instruction is a CSR one
+      res(i).csrdo      := pipe(i).csrdo;       -- read only CSR
+      res(i).xc         := pipe(i).xc;          -- exception/trap
+      res(i).mexc       := pipe(i).mexc;        -- inst memory excp
+      res(i).cause      := pipe(i).cause;   -- exception/trap cause
+      res(i).tval       := pipe(i).tval;  -- exception/trap value
+      res(i).fusel      := pipe(i).fusel;   -- assigned functional unit
+      res(i).fpu        := pipe(i).fpu;                  -- FPU issue ID
+      res(i).fpu_flush  := pipe(i).fpu_flush;               -- FPU instruction has been flushed
+    end loop;
+    return res;
+  end;
 
   type icdtype_ecc       is array (0 to iways - 1) of ecc_vector(WORD64_ECC_RANGE.left downto WORD64_ECC_RANGE.right);
 
@@ -1065,6 +1131,11 @@ architecture rtl of iunv is
 
   -- PC Gen <-> Fetch Stage --------------------------------------------------
   type fetch_reg_type is record                       
+    pc          : pctype;         -- pc to be fetched
+    valid       : std_ulogic;                                  -- valid fetch request
+  end record;
+
+  type fetch_reg_type_protect is record                       
     pc : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);         -- pc to be fetched
     valid       : std_ulogic_vector(2 downto 0);                                  -- valid fetch request
   end record;
@@ -1082,6 +1153,27 @@ architecture rtl of iunv is
 
   -- Fetch Stage <-> Decode Stage --------------------------------------------
   type decode_reg_type is record
+    pc          : pctype;                             -- fetched program counter as from fetch stage
+    inst        : icdtype;                            -- instructions
+    buff        : iqueue_type;                        -- single-entry instruction buffer
+    valid       : std_ulogic;                         -- instructions are valid
+    xc          : std_ulogic;                         -- exception/trap from previous stages
+    cause       : cause_type;                         -- exception/trap cause from previous stages
+    tval        : wordx;                              -- exception/trap value from previous stages
+    way         : std_logic_vector(IWAYMSB downto 0); -- cache way where instructions are located
+    mexc        : std_ulogic;                         -- error in cache access
+    was_xc      : std_ulogic;                         -- error just before
+    exctype     : std_ulogic;                         -- error type in cache access
+    exchyper    : std_ulogic;                         -- Hypervisor exception in cache access
+    tval2       : wordx;                              -- Hypervisor exception info from cache
+    tval2type   : word2;                              -- Hypervisor exception info from cache
+    prediction  : prediction_array_type;              -- BHT record
+    hit         : std_ulogic;                         -- fetched pc hit BTB
+    unaligned   : std_ulogic;                         -- unaligned compressed instruction flag due to previous fetched pair
+--    uninst      : iword16_type;                       -- unaligned compressed instruction
+  end record;
+
+  type decode_reg_type_protect is record
     pc          : ecc_vector(PCTYPE_ECC_RANGE.left downto PCTYPE_ECC_RANGE.right);    -- fetched program counter as from fetch stage
     inst        : icdtype_ecc;                                                        -- instructions
     buff        : iqueue_type_ecc;                                                    -- single-entry instruction buffer
@@ -1106,7 +1198,7 @@ architecture rtl of iunv is
 --    uninst      : iword16_type;                                                     -- unaligned compressed instruction
   end record;
 
-  function decode_has_error(decode : decode_reg_type; de_rvc_valid: fetch_pair; de_rvc_hold : std_ulogic) return boolean is
+  function decode_has_error(decode : decode_reg_type_protect; de_rvc_valid: fetch_pair; de_rvc_hold : std_ulogic) return boolean is
   begin
       return hamming_has_error(decode.pc) or 
               (hamming_has_error(decode.inst(0)) and de_rvc_valid /= "00" and de_rvc_hold = '0') or
@@ -1120,6 +1212,21 @@ architecture rtl of iunv is
 
   -- Decode Stage <-> Register Access Stage -----------------------------------
   type regacc_reg_type is record
+    ctrl        : pipeline_ctrl_lanes_type;  -- pipeline control record
+    csr         : csr_type;                  -- CSR information
+    rfa1        : rfa_lanes_type;            -- register file record for op1
+    rfa2        : rfa_lanes_type;            -- register file record for op2
+    immv        : lanes_type;                -- immediate as a valid operand flags
+    imm         : wordx_lanes_type;          -- immediate operands
+    pcv         : lanes_type;                -- program counter as a valid operand flags
+    swap        : std_ulogic;                -- instructions are swapped in lanes
+    raso        : nv_ras_out_type;           -- RAS record
+    rasi        : nv_ras_in_type;            -- speculative RAS record
+    csrw_eq     : std_logic_vector(3 downto 0);  --related to csr write hold checks
+    lalu_pre    : lanes_type;                -- prechecked lalu
+  end record;
+
+  type regacc_reg_type_protect is record
     ctrl        : pipeline_ctrl_lanes_type_ecc;  -- pipeline control record
     csr         : csr_type_ecc;                  -- CSR information
     rfa1        : rfa_lanes_type_ecc;            -- register file record for op1
@@ -1134,7 +1241,7 @@ architecture rtl of iunv is
     lalu_pre    : lanes_type_tmr;                -- prechecked lalu
   end record;
 
-  function regacc_has_error(regacc : regacc_reg_type) return boolean is
+  function regacc_has_error(regacc : regacc_reg_type_protect) return boolean is
   begin
       return  pipeline_ctrl_lanes_has_error(regacc.ctrl) or
               csr_has_error(regacc.csr) or
@@ -1199,6 +1306,59 @@ architecture rtl of iunv is
     raso        : nv_ras_out_type;           -- RAS record
     rasi        : nv_ras_in_type;            -- Speculative RAS record
   end record;
+  type execute_reg_type_parity is record
+    ctrl        : pipeline_ctrl_lanes_type_parity;  -- Pipeline control record
+    csr         : csr_type;                  -- CSR information
+    rfa1        : rfa_lanes_type;            -- Register file record for op1
+    rfa2        : rfa_lanes_type;            -- Register file record for op2
+    alu         : alu_pair_type;             -- ALUs record
+    stdata      : wordx;                     -- Data to be stored for ST instructions
+    accesshold  : std_logic_vector(0 to 1);  -- Memory access hold due to CSR access.
+    exechold    : std_logic_vector(0 to 2);  -- Execution hold due to pipeline flushing instruction.
+    fpuhold     : std_logic_vector(0 to 5);  -- Execution hold due to FPU instruction.
+    fpu_wait    : std_ulogic;                -- FPU instruction will return result in EX.
+    was_held    : std_ulogic;                -- Bubble was inserted after EX
+    swap        : std_ulogic;                -- Instructions are swapped
+    jimm        : wordx;                     -- Imm Value for Jump Unit
+    jop1        : wordx;                     -- Op1 Value for Jump Unit
+    jumpforw    : rs_lanes_type;             -- Jump forwarded flags
+    aluforw     : rs_lanes_type;             -- ALUs forwarded flags
+    alupreforw1 : mux_lanes_type;            -- ALUs preforward information
+    alupreforw2 : mux_lanes_type;            -- ALUs preforward information
+    stforw      : lanes_type;                -- Store unit forwarded flags
+    lbranch     : std_ulogic;                -- Instructions makes use of late branch unit
+    spec_ld     : std_ulogic;                -- Speculative load operation flag
+    raso        : nv_ras_out_type;           -- RAS record
+    rasi        : nv_ras_in_type;            -- Speculative RAS record
+  end record;
+  function execute_parity_fix_error(exe : execute_reg_type_parity) return execute_reg_type is
+    variable res : execute_reg_type;
+  begin
+    res.ctrl        := to_pipeline_ctrl_lanes_type(exe.ctrl);
+    res.csr         := exe.csr;
+    res.rfa1        := exe.rfa1;
+    res.rfa2        := exe.rfa2;
+    res.alu         := exe.alu;
+    res.stdata      := exe.stdata;
+    res.accesshold  := exe.accesshold;
+    res.exechold    := exe.exechold;
+    res.fpuhold     := exe.fpuhold;
+    res.fpu_wait    := exe.fpu_wait;
+    res.was_held    := exe.was_held;
+    res.swap        := exe.swap;
+    res.jimm        := exe.jimm;
+    res.jop1        := exe.jop1;
+    res.jumpforw    := exe.jumpforw;
+    res.aluforw     := exe.aluforw;
+    res.alupreforw1 := exe.alupreforw1;
+    res.alupreforw2 := exe.alupreforw2;
+    res.stforw      := exe.stforw;
+    res.lbranch     := exe.lbranch;
+    res.spec_ld     := exe.spec_ld;
+    res.raso        := exe.raso;
+    res.rasi        := exe.rasi;
+    return res;
+  end;
 
   -- Data Cache Inputs --------------------------------------------------------
   type dcache_in_type is record
@@ -1427,11 +1587,29 @@ architecture rtl of iunv is
   constant faults_none : stage_fault := (others => FALSE);
 
   -- All Stages ---------------------------------------------------------------
-  type registers is record
+  type registers_default is record
     f       : fetch_reg_type;
     d       : decode_reg_type;
     a       : regacc_reg_type;
-    e       : execute_reg_type;
+    e       : execute_reg_type_parity;
+    m       : memory_reg_type;
+    x       : exception_reg_type;
+    wb      : writeback_reg_type;
+    csr     : csr_reg_type;
+    mmu     : nv_csr_out_type;  -- Pipelined on the way to MMU/cache controller
+    dm      : debugmodule_reg_type;
+    evt     : std_logic_vector(0 to 255);                -- 0 not used
+    cevt    : std_logic_vector(0 to perf_cnts + 3 - 1);  -- 0-2 not used
+    evtirq  : std_logic_vector(0 to perf_cnts + 3 - 1);  -- 0-2 not used
+    fpo     : fpu5_out_type;    -- FPU output, for logging
+    fpflush : std_logic_vector(4 downto 0);
+  end record;
+
+  type registers is record
+    f       : fetch_reg_type_protect;
+    d       : decode_reg_type_protect;
+    a       : regacc_reg_type_protect;
+    e       : execute_reg_type_parity;
     m       : memory_reg_type;
     x       : exception_reg_type;
     wb      : writeback_reg_type;
@@ -1489,7 +1667,7 @@ architecture rtl of iunv is
     v.a.csrw_eq                 := (others => '0');
     v.a.lalu_pre                := (others => (others => '0'));
     -- Execute Stage
-    v.e.ctrl                    := (others => pipeline_ctrl_none);
+    v.e.ctrl                    := (others => pipeline_ctrl_none_parity);
     v.e.csr                     := csr_none;
     v.e.rfa1                    := (others => (others => '0'));
     v.e.rfa2                    := (others => (others => '0'));
@@ -1628,6 +1806,12 @@ architecture rtl of iunv is
   -- Hart index
   signal hart           : std_logic_vector(3 downto 0);
 
+  -- function to_registers_default(r : registers) return registers_default is
+  --   variable res : registers_default;
+  -- begin
+
+  -- end;
+
 
 
 
@@ -1640,7 +1824,7 @@ architecture rtl of iunv is
   begin
     case stage is
     when a  => return to_pipeline_ctrl_lanes_type(r.a.ctrl);
-    when e  => return r.e.ctrl;
+    when e  => return to_pipeline_ctrl_lanes_type(r.e.ctrl);
     when m  => return r.m.ctrl;
     when x  => return r.x.ctrl;
     when wb => return r.wb.ctrl;
@@ -1791,7 +1975,7 @@ architecture rtl of iunv is
     elsif stage = e then
       c_valid := r.e.ctrl(lane).valid;
       c_rdv   := r.e.ctrl(lane).rdv;
-      c_rd    := r.e.ctrl(lane).inst(11 downto 7);
+      c_rd    := std_logic_vector(get_doubl_data(r.e.ctrl(lane).inst)(11 downto 7));
     elsif stage = m then
       c_valid := r.m.ctrl(lane).valid;
       c_rdv   := r.m.ctrl(lane).rdv;
@@ -1891,7 +2075,7 @@ architecture rtl of iunv is
       c_rd    := rfatype(get_data(r.a.ctrl(lane).inst)(11 downto 7));
     elsif stage = e then
       c_valid := r.e.ctrl(lane).valid;
-      c_rd    := r.e.ctrl(lane).inst(11 downto 7);
+      c_rd    :=std_logic_vector(get_doubl_data(r.e.ctrl(lane).inst)(11 downto 7));
     elsif stage = m then
       c_valid := r.m.ctrl(lane).valid;
       c_rd    := r.m.ctrl(lane).inst(11 downto 7);
@@ -1965,7 +2149,7 @@ architecture rtl of iunv is
       c_rd  := rfatype(get_data(r.a.ctrl(lane).inst)(11 downto 7));
     elsif stage = e then
       c_rdv := r.e.ctrl(lane).rdv;
-      c_rd  := r.e.ctrl(lane).inst(11 downto 7);
+      c_rd  := std_logic_vector(get_doubl_data(r.e.ctrl(lane).inst)(11 downto 7));
     elsif stage = m then
       c_rdv := r.m.ctrl(lane).rdv;
       c_rd  := r.m.ctrl(lane).inst(11 downto 7);
@@ -2099,7 +2283,7 @@ architecture rtl of iunv is
       c_inst  := word(get_data(r.a.ctrl(fpu_lane).inst));
     elsif stage = e then
       c_valid := r.e.ctrl(fpu_lane).valid and not r.e.ctrl(fpu_lane).xc;
-      c_inst  := r.e.ctrl(fpu_lane).inst;
+      c_inst  := std_logic_vector(get_doubl_data(r.e.ctrl(fpu_lane).inst));
     elsif stage = m then
       c_valid := r.m.ctrl(fpu_lane).valid and not r.m.ctrl(fpu_lane).xc;
       c_inst  := r.m.ctrl(fpu_lane).inst;
@@ -2188,10 +2372,10 @@ architecture rtl of iunv is
       end if;
 
       if r.e.ctrl(i).valid = '1' and r.e.ctrl(i).rdv = '1' and e_valid = '1' then
-        if r.e.ctrl(i).inst(11 downto 7) =  rfa1(dst_lane) then
+        if std_logic_vector(get_doubl_data(r.e.ctrl(i).inst)(11 downto 7)) =  rfa1(dst_lane) then
           forwarding.rfa1(stage_type'pos(e))(i) := '1';
         end if;
-        if r.e.ctrl(i).inst(11 downto 7) =  rfa2(dst_lane) then
+        if std_logic_vector(get_doubl_data(r.e.ctrl(i).inst)(11 downto 7)) =  rfa2(dst_lane) then
           forwarding.rfa2(stage_type'pos(e))(i) := '1';
         end if;
       end if;
@@ -7007,10 +7191,10 @@ architecture rtl of iunv is
       exechold   := (exechold'range => '1');
     end if;
     if r.e.ctrl(memory_lane).valid = '1' then
-      if is_fence_i(r.e.ctrl(memory_lane).inst)     or
-         is_sfence_vma(r.e.ctrl(memory_lane).inst)  or
-         is_hfence_vvma(r.e.ctrl(memory_lane).inst) or
-         is_hfence_gvma(r.e.ctrl(memory_lane).inst) then
+      if is_fence_i(std_logic_vector(get_doubl_data(r.e.ctrl(memory_lane).inst)))     or
+         is_sfence_vma(std_logic_vector(get_doubl_data(r.e.ctrl(memory_lane).inst)))  or
+         is_hfence_vvma(std_logic_vector(get_doubl_data(r.e.ctrl(memory_lane).inst))) or
+         is_hfence_gvma(std_logic_vector(get_doubl_data(r.e.ctrl(memory_lane).inst))) then
         exechold := (exechold'range => '1');
       end if;
     end if;
@@ -7037,7 +7221,7 @@ architecture rtl of iunv is
         -- Can as well look for any normal FPU instruction (memory don't touch flags),
         -- since anything else will not have completed, anyway (and a cycle of
         -- latency would not have mattered in any case).
-        if is_fpu(r.e.ctrl(fpu_lane).inst) then
+        if is_fpu(std_logic_vector(get_doubl_data(r.e.ctrl(fpu_lane).inst))) then
           hold  := '1';
         end if;
       end if;
@@ -7098,8 +7282,8 @@ architecture rtl of iunv is
            -- HSV inst: size < 32 when inst(27) = 0
           ((((not is_hsv(std_logic_vector(get_data(r.a.ctrl(memory_lane).inst))) and get_data(r.a.ctrl(memory_lane).inst)(13) = '0') or
              (    is_hsv(std_logic_vector(get_data(r.a.ctrl(memory_lane).inst))) and get_data(r.a.ctrl(memory_lane).inst)(27) = '0')) or
-            ((not is_hsv(r.e.ctrl(memory_lane).inst) and r.e.ctrl(memory_lane).inst(13) = '0') or
-             (    is_hsv(r.e.ctrl(memory_lane).inst) and r.e.ctrl(memory_lane).inst(27) = '0'))
+            ((not is_hsv(std_logic_vector(get_doubl_data(r.e.ctrl(memory_lane).inst))) and get_doubl_data(r.e.ctrl(memory_lane).inst)(13) = '0') or
+             (    is_hsv(std_logic_vector(get_doubl_data(r.e.ctrl(memory_lane).inst))) and get_doubl_data(r.e.ctrl(memory_lane).inst)(27) = '0'))
            ) or
            r.csr.dfeaturesen.b2bst_dis = '1')) or
          -- Load directly following store is also not allowed.
@@ -7162,7 +7346,7 @@ architecture rtl of iunv is
     ---------------------------------------------------------------------------
     -- A load/store operation need to be at least 2 cycles behind CBO operations
     if ext_zicbom /= 0 then
-      if is_cbo(r.e.ctrl(memory_lane).inst) then
+      if is_cbo(std_logic_vector(get_doubl_data(r.e.ctrl(memory_lane).inst))) then
         if v_fusel_eq(r, a, memory_lane, ST) or v_fusel_eq(r, a, memory_lane, LD) then
           hold := '1';
         end if;
@@ -8697,9 +8881,13 @@ begin
 
     variable itrace_in : itrace_in_type;
 
+    variable execute            : execute_reg_type;
+
 
   begin
     v := r;
+
+    execute := execute_parity_fix_error(v.e);
 
 
     iustall := '0';
@@ -9683,13 +9871,13 @@ begin
     branch_unit(active_extensions,
                 ex_alu_op1(branch_lane),                  -- in  : Forwarded Op1
                 ex_alu_op2(branch_lane),                  -- in  : Forwarded Op2
-                r.e.ctrl(branch_lane).valid,              -- in  : Enable/Valid Signal
-                r.e.ctrl(branch_lane).branch.valid,       -- in  : Branch Valid Signal
-                r.e.ctrl(branch_lane).inst(14 downto 12), -- in  : Inst funct3
-                r.e.ctrl(branch_lane).branch.addr,        -- in  : Branch Target Address
-                r.e.ctrl(branch_lane).branch.naddr,       -- in  : Branch Next Address
-                r.e.ctrl(branch_lane).branch.taken,       -- in  : Prediction
-                r.e.ctrl(branch_lane).pc,                 -- in  : PC
+                execute.ctrl(branch_lane).valid,              -- in  : Enable/Valid Signal
+                execute.ctrl(branch_lane).branch.valid,       -- in  : Branch Valid Signal
+                execute.ctrl(branch_lane).inst(14 downto 12), -- in  : Inst funct3
+                execute.ctrl(branch_lane).branch.addr,        -- in  : Branch Target Address
+                execute.ctrl(branch_lane).branch.naddr,       -- in  : Branch Next Address
+                execute.ctrl(branch_lane).branch.taken,       -- in  : Prediction
+                execute.ctrl(branch_lane).pc,                 -- in  : PC
                 ex_branch_valid,                          -- out : Branch Valid
                 ex_branch_mis,                            -- out : Branch Outcome
                 ex_branch_addr,                           -- out : Branch Address
@@ -9705,9 +9893,9 @@ begin
                        );
 
     -- Jump Unit ----------------------------------------------------------
-    jump_unit(r.e.ctrl(branch_lane),       -- in  : Ctrl
-              r.e.jimm,                    -- in  : Imm
-              r.e.raso,                    -- in  : RAS
+    jump_unit(execute.ctrl(branch_lane),       -- in  : Ctrl
+              execute.jimm,                    -- in  : Imm
+              execute.raso,                    -- in  : RAS
               ex_jump_op1,                 -- in  : Forwarded data
               ex_branch_flush,             -- in  : Flush
               ex_jump,                     -- out : Jump Signal
@@ -9735,12 +9923,12 @@ begin
                          );
 
     -- Mul Unit -----------------------------------------------------------
-    mul_gen(r.e.ctrl(0).inst,              -- in  : Instruction Lane 0
-            r.e.ctrl(one).inst,            -- in  : Instruction Lane 1
-            r.e.ctrl(0).fusel,             -- in  : Functional Unit Lane 0
-            r.e.ctrl(one).fusel,           -- in  : Functional Unit Lane 1
-            r.e.ctrl(0).valid,             -- in  : Valid Lane 0
-            r.e.ctrl(one).valid,           -- in  : Valid Lane 1
+    mul_gen(execute.ctrl(0).inst,              -- in  : Instruction Lane 0
+            execute.ctrl(one).inst,            -- in  : Instruction Lane 1
+            execute.ctrl(0).fusel,             -- in  : Functional Unit Lane 0
+            execute.ctrl(one).fusel,           -- in  : Functional Unit Lane 1
+            execute.ctrl(0).valid,             -- in  : Valid Lane 0
+            execute.ctrl(one).valid,           -- in  : Valid Lane 1
             ex_alu_op1(0),                 -- in  : Execute Operand Lane 0
             ex_alu_op2(0),                 -- in  : Execute Operand Lane 0
             ex_alu_op1(one),               -- in  : Execute Operand Lane 1
@@ -9755,9 +9943,9 @@ begin
             );
 
     addr_gen(active_extensions,
-             r.e.ctrl(memory_lane).inst,   -- in  : Instruction
-             r.e.ctrl(memory_lane).fusel,  -- in  : Functional Unit
-             r.e.ctrl(memory_lane).valid,  -- in  : Valid Instruction
+             execute.ctrl(memory_lane).inst,   -- in  : Instruction
+             execute.ctrl(memory_lane).fusel,  -- in  : Functional Unit
+             execute.ctrl(memory_lane).valid,  -- in  : Valid Instruction
              ex_alu_op1(memory_lane),      -- in  : Op1 for Address Generation
              ex_alu_op2(memory_lane),      -- in  : Op2 for Address Generation
              ex_dci_eaddress,              -- out : Data Address
@@ -9768,7 +9956,7 @@ begin
 
     -- Check for misaligned FPU load/store
     ex_fpu_flush := '0';
-    if is_fpu_mem(r.e.ctrl(memory_lane).inst) and ex_address_xc = '1' then
+    if is_fpu_mem(execute.ctrl(memory_lane).inst) and ex_address_xc = '1' then
 --      report "ex_fpu_flush " & tost(ex_address_xc);
       ex_fpu_flush := '1';
     end if;
@@ -9802,8 +9990,8 @@ begin
       end if;
     end if;
 
-    fpu_gen(r.e.ctrl(fpu_lane).inst,       -- in  : Instruction
-            r.e.ctrl(fpu_lane).valid,      -- in  : Valid
+    fpu_gen(execute.ctrl(fpu_lane).inst,       -- in  : Instruction
+            execute.ctrl(fpu_lane).valid,      -- in  : Valid
             fpu_holdn,                     -- in  : FPU Ready Signal
             ex_hold_pc_muldiv,             -- in  : Hold PC due to Mul/Div Unit
             ex_hold_pc                     -- out : Hold PC due to FPU
@@ -9839,68 +10027,68 @@ begin
     ex_result                    := ex_alu_res;
     -- Merge result for JAL and JALR instructions.
     if v_fusel_eq(r, e, branch_lane, FLOW) then
-      ex_result(branch_lane)     := pc2xlen(r.e.ctrl(branch_lane).branch.naddr);
+      ex_result(branch_lane)     := pc2xlen(execute.ctrl(branch_lane).branch.naddr);
       ex_result_fwd(branch_lane) := '1';
     end if;
 
     v.m.fpuflags               := (others => '0');
-    if ext_f = 1 and r.e.ctrl(fpu_lane).valid = '1' and
-       is_fpu(r.e.ctrl(fpu_lane).inst) then
+    if ext_f = 1 and execute.ctrl(fpu_lane).valid = '1' and
+       is_fpu(execute.ctrl(fpu_lane).inst) then
       ex_result(fpu_lane)        := fpuo.data2int(wordx'range);
       ex_result_fwd(fpu_lane)    := '1';
       -- Ensure that FPU flags in IU pipeline are only set for FPU->IU operations.
-      if not is_fpu_rd(r.e.ctrl(fpu_lane).inst) then
+      if not is_fpu_rd(execute.ctrl(fpu_lane).inst) then
         v.m.fpuflags             := fpuo.flags2int;
       end if;
     end if;
 
     -- To Memory Stage ----------------------------------------------------
     for i in lanes'range loop
-      v.m.ctrl(i).pc      := r.e.ctrl(i).pc;
-      v.m.ctrl(i).inst    := r.e.ctrl(i).inst;
-      v.m.ctrl(i).cinst   := r.e.ctrl(i).cinst;
-      v.m.ctrl(i).valid   := r.e.ctrl(i).valid and not ex_flush;
-      v.m.ctrl(i).rdv     := r.e.ctrl(i).rdv;
-      v.m.ctrl(i).comp    := r.e.ctrl(i).comp;
-      v.m.ctrl(i).branch  := r.e.ctrl(i).branch;
-      v.m.ctrl(i).csrv    := r.e.ctrl(i).csrv;
-      v.m.ctrl(i).csrdo   := r.e.ctrl(i).csrdo;
+      v.m.ctrl(i).pc      := execute.ctrl(i).pc;
+      v.m.ctrl(i).inst    := execute.ctrl(i).inst;
+      v.m.ctrl(i).cinst   := execute.ctrl(i).cinst;
+      v.m.ctrl(i).valid   := execute.ctrl(i).valid and not ex_flush;
+      v.m.ctrl(i).rdv     := execute.ctrl(i).rdv;
+      v.m.ctrl(i).comp    := execute.ctrl(i).comp;
+      v.m.ctrl(i).branch  := execute.ctrl(i).branch;
+      v.m.ctrl(i).csrv    := execute.ctrl(i).csrv;
+      v.m.ctrl(i).csrdo   := execute.ctrl(i).csrdo;
       v.m.ctrl(i).xc      := ex_xc(i);
       v.m.ctrl(i).cause   := ex_xc_cause(i);
       v.m.ctrl(i).tval    := ex_xc_tval(i);
-      v.m.ctrl(i).fusel   := r.e.ctrl(i).fusel;
-      v.m.ctrl(i).mexc    := r.e.ctrl(i).mexc;
-      v.m.rfa1(i)         := r.e.rfa1(i);
-      v.m.rfa2(i)         := r.e.rfa2(i);
+      v.m.ctrl(i).fusel   := execute.ctrl(i).fusel;
+      v.m.ctrl(i).mexc    := execute.ctrl(i).mexc;
+      v.m.rfa1(i)         := execute.rfa1(i);
+      v.m.rfa2(i)         := execute.rfa2(i);
       v.m.result(i)       := ex_result(i);
     end loop;
-    v.m.ctrl(fpu_lane).fpu := r.e.ctrl(fpu_lane).fpu;
+    v.m.ctrl(fpu_lane).fpu := execute.ctrl(fpu_lane).fpu;
     v.m.ctrl(fpu_lane).fpu_flush := '0';
-    v.m.csr               := r.e.csr;
-    v.m.swap              := r.e.swap;
+    v.m.csr               := execute.csr;
+    v.m.swap              := execute.swap;
     v.m.stdata            := ex_stdata;
-    v.m.stforw            := r.e.stforw;
-    v.m.lbranch           := r.e.lbranch;
+    v.m.stforw            := execute.stforw;
+    v.m.lbranch           := execute.lbranch;
     v.m.fpdata            := fpuo.data2int;
-    v.m.rasi              := r.e.rasi;
-    v.m.spec_ld           := r.e.spec_ld;
+    v.m.rasi              := execute.rasi;
+    v.m.spec_ld           := execute.spec_ld;
 
     -- Branch Signals -----------------------------------------------------
     ex_branch                            := '0';
     ex_branch_target                     := ex_branch_addr;
     v.m.ctrl(branch_lane).branch.mpred   := '0';
-    if (ex_branch_valid and ex_branch_mis) = '1' and ex_branch_flush = '0' and r.e.lbranch = '0' then
+    if (ex_branch_valid and ex_branch_mis) = '1' and ex_branch_flush = '0' and execute.lbranch = '0' then
       v.m.ctrl(branch_lane).branch.mpred := '1';
-      v.m.ctrl(branch_lane).branch.taken := not r.e.ctrl(branch_lane).branch.taken;
-      if r.e.swap = '1' and single_issue = 0 then
+      v.m.ctrl(branch_lane).branch.taken := not execute.ctrl(branch_lane).branch.taken;
+      if execute.swap = '1' and single_issue = 0 then
         v.m.ctrl(0).valid := '0';
       end if;
     end if;
 
     -- Late ALUs Signals --------------------------------------------------
     -- Do not update if a bubble was inserted after EX last cycle!
-    if r.e.was_held = '0' then
-      v.m.alu          := r.e.alu;
+    if execute.was_held = '0' then
+      v.m.alu          := execute.alu;
       for i in lanes'range loop
         v.m.alu(i).op1 := ex_alu_op1(i);
         v.m.alu(i).op2 := ex_alu_op2(i);
@@ -9913,8 +10101,8 @@ begin
     end if;
 
     -- Store Data ---------------------------------------------------------
-    dcache_gen(r.e.ctrl(memory_lane).inst,   -- in  : Instruction
-               r.e.ctrl(memory_lane).fusel,  -- in  : Functional Unit
+    dcache_gen(execute.ctrl(memory_lane).inst,   -- in  : Instruction
+               execute.ctrl(memory_lane).fusel,  -- in  : Functional Unit
                v.m.ctrl(memory_lane).valid,  -- in  : Valid Instruction
                ex_address_xc,                -- in  : Address misaligned?
                r.csr.dfeaturesen,            -- in  : ASI information
@@ -9990,8 +10178,8 @@ begin
       x_ctrl    => r.x.ctrl,
       m_swap    => r.m.swap,
       m_ctrl    => r.m.ctrl,
-      e_swap    => r.e.swap,
-      e_ctrl    => r.e.ctrl,
+      e_swap    => execute.swap,
+      e_ctrl    => execute.ctrl,
       avalid    => v.m.dci.enaddr,
       addr      => v.m.address,
       size      => v.m.dci.size,
@@ -10143,7 +10331,7 @@ begin
     -- To Execute Stage ---------------------------------------------------
     for i in lanes'range loop
       v.e.ctrl(i).pc      := pctype(get_data(r.a.ctrl(i).pc));
-      v.e.ctrl(i).inst    := word(get_data(r.a.ctrl(i).inst));
+      v.e.ctrl(i).inst    := set_doubl_data((get_data(r.a.ctrl(i).inst)));
       v.e.ctrl(i).cinst   := word16(get_data(r.a.ctrl(i).cinst));
       v.e.ctrl(i).valid   := r.a.ctrl(i).valid(0) and not ra_flush;
       v.e.ctrl(i).comp    := r.a.ctrl(i).comp(0);
@@ -10166,7 +10354,7 @@ begin
         -- Pass NOOP into the pipeline if there was a fetch fault.
         -- After this point no random instructions will be in the pipeline,
         -- but up to here it is necessary to check xc!
-        v.e.ctrl(i).inst  := x"00100013"; -- addi x0,x0,1
+        v.e.ctrl(i).inst  := set_doubl_data(x"00100013"); -- addi x0,x0,1
         v.e.ctrl(i).cinst := x"0004";     -- c.addi x0,x0,1
         -- Make sure to mask precalculated things.
         v.e.ctrl(i).rdv   := '0';
@@ -10184,7 +10372,7 @@ begin
         v.e.fpu_wait := '1';
       else
         v.e.fpu_wait := '0';
-        if is_valid_fpu(v, e) and not is_fpu_rd(v.e.ctrl(FPU_LANE).inst) and
+        if is_valid_fpu(v, e) and not is_fpu_rd(execute.ctrl(FPU_LANE).inst) and
            not fpuo.holdn = '0' and not holdn = '0' then
           v.e.fpu_wait := '1';
         end if;
@@ -10818,7 +11006,7 @@ begin
         v.a.csrw_eq(0) := '1';
       end if;
     end if;
-    if std_logic_vector(get_data(v.a.ctrl(csr_lane).inst)(31 downto 20)) = r.e.ctrl(csr_lane).inst(31 downto 20) then
+    if std_logic_vector(get_data(v.a.ctrl(csr_lane).inst)(31 downto 20)) = execute.ctrl(csr_lane).inst(31 downto 20) then
       if csr_ok(r,e) then
         v.a.csrw_eq(1) := '1';
       end if;
@@ -12139,7 +12327,7 @@ begin
     vfpui                  := fpu5_in_none;
     if ext_f = 1 then
       -- From Execute Stage
-      fpu_ctrl             := r.e.ctrl(fpu_lane);
+      fpu_ctrl             := execute.ctrl(fpu_lane);
       vfpui.inst           := fpu_ctrl.inst;
       vfpui.e_valid        := to_bit(is_valid_fpu(r, e));
       vfpui.issue_id       := fpu_ctrl.fpu;
