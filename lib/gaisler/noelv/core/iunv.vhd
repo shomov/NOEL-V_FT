@@ -1376,8 +1376,30 @@ architecture rtl of iunv is
     ctrl        : alu_ctrl;                -- ALU control
     lalu        : std_ulogic;              -- instruction makes use of lalu
   end record;
+  
+  type alu_type_parity is record
+    op1         : doubling_vector(wordx'length*2-1 downto -1);    -- operand 1
+    op2         : doubling_vector(wordx'length*2-1 downto -1);    -- operand 2
+    valid       : std_ulogic_vector(2 downto 0);                  -- enable signal
+    ctrl        : alu_ctrl;                                       -- ALU control
+    lalu        : std_ulogic_vector(2 downto 0);                  -- instruction makes use of lalu
+  end record;
 
   type alu_pair_type is array (lanes'range) of alu_type;
+  type alu_pair_type_parity is array (lanes'range) of alu_type_parity;
+
+  function to_alu_type(alu : alu_pair_type_parity) return alu_pair_type is
+    variable res : alu_pair_type;
+  begin
+    for i in lanes'range loop
+      res(i).op1    := wordx(get_doubl_data(alu(i).op1));
+      res(i).op2    := wordx(get_doubl_data(alu(i).op2));
+      res(i).valid  := std_logic(tmr_voter(alu(i).valid(0), alu(i).valid(1), alu(i).valid(2)));
+      res(i).ctrl   := alu(i).ctrl;
+      res(i).lalu   := std_logic(tmr_voter(alu(i).lalu(0), alu(i).lalu(1), alu(i).lalu(2)));
+    end loop;
+    return res;
+  end;  
 
   constant alu_none  : alu_type := (
     op1         => zerox,
@@ -1385,6 +1407,13 @@ architecture rtl of iunv is
     valid       => '0',
     ctrl        => alu_ctrl_none,
     lalu        => '0'
+    );
+  constant alu_none_parity  : alu_type_parity := (
+    op1         => set_doubl_data(std_ulogic_vector(zerox)),
+    op2         => set_doubl_data(std_ulogic_vector(zerox)),
+    valid       => (others => '0'),
+    ctrl        => alu_ctrl_none,
+    lalu        => (others => '0')
     );
 
   -- CSR Operation
@@ -1424,7 +1453,7 @@ architecture rtl of iunv is
     csr         : csr_type;                  -- CSR information
     rfa1        : rfa_lanes_type;            -- Register file record for op1
     rfa2        : rfa_lanes_type;            -- Register file record for op2
-    alu         : alu_pair_type;             -- ALUs record
+    alu         : alu_pair_type_parity;      -- ALUs record
     stdata      : wordx;                     -- Data to be stored for ST instructions
     accesshold  : std_logic_vector(0 to 1);  -- Memory access hold due to CSR access.
     exechold    : std_logic_vector(0 to 2);  -- Execution hold due to pipeline flushing instruction.
@@ -1452,7 +1481,7 @@ architecture rtl of iunv is
     res.csr         := exe.csr;
     res.rfa1        := exe.rfa1;
     res.rfa2        := exe.rfa2;
-    res.alu         := exe.alu;
+    res.alu         := to_alu_type(exe.alu);
     res.stdata      := exe.stdata;
     res.accesshold  := exe.accesshold;
     res.exechold    := exe.exechold;
@@ -1481,7 +1510,7 @@ architecture rtl of iunv is
     res.csr         := exe.csr;
     res.rfa1        := exe.rfa1;
     res.rfa2        := exe.rfa2;
-    res.alu         := exe.alu;
+    res.alu         := to_alu_type(exe.alu);
     res.stdata      := exe.stdata;
     res.accesshold  := exe.accesshold;
     res.exechold    := exe.exechold;
@@ -1814,7 +1843,7 @@ architecture rtl of iunv is
     v.e.csr                     := csr_none;
     v.e.rfa1                    := (others => (others => '0'));
     v.e.rfa2                    := (others => (others => '0'));
-    v.e.alu                     := (others => alu_none);
+    v.e.alu                     := (others => alu_none_parity);
     v.e.stdata                  := zerox;
     v.e.accesshold              := (others => '0');
     v.e.exechold                := (others => '0');
@@ -3834,8 +3863,8 @@ architecture rtl of iunv is
     -- Non-constant
     variable forw_op1 : word2     := r.e.alupreforw1(lane)(1 downto 0);
     variable forw_op2 : word2     := r.e.alupreforw2(lane)(1 downto 0);
-    variable op1      : wordx     := r.e.alu(lane).op1;
-    variable op2      : wordx     := r.e.alu(lane).op2;
+    variable op1      : wordx     := wordx(get_doubl_data(r.e.alu(lane).op1));
+    variable op2      : wordx     := wordx(get_doubl_data(r.e.alu(lane).op2));
   begin
     -- Revert back to old code (to synthesize with Synplify)
     if NO_PREFORWARD then
@@ -6994,7 +7023,7 @@ architecture rtl of iunv is
       if v_fusel_eq(r, a, branch_lane, BRANCH) then
         for i in lanes'range loop
           -- LALU in execution stage
-          if r.e.alu(i).lalu = '1' then
+          if r.e.alu(i).lalu(0) = '1' then
             if v_rd_eq(r, e, i, to_rfatype(r.a.rfa1(branch_lane))) or
                v_rd_eq(r, e, i, to_rfatype(r.a.rfa2(branch_lane))) then
               lbranch := '1';
@@ -7006,7 +7035,7 @@ architecture rtl of iunv is
       -- lalu here is guaranteed to be due to CSR.
       if v_fusel_eq(r, a, branch_lane, BRANCH) then
         -- LALU in execution stage
-        if r.e.alu(csr_lane).lalu = '1' then
+        if r.e.alu(csr_lane).lalu(0) = '1' then
           if v_rd_eq(r, e, csr_lane, to_rfatype(r.a.rfa1(branch_lane))) or
              v_rd_eq(r, e, csr_lane, to_rfatype(r.a.rfa2(branch_lane))) then
             lbranch   := '1';
@@ -7094,7 +7123,7 @@ architecture rtl of iunv is
     -- A    ALU <- Rn         or  ALU <- Rn
     -- EX   any -> Rn (late)  or  any -> Rn (late)
     for j in lanes'range loop
-      if r.e.alu(j).lalu = '1' then
+      if r.e.alu(j).lalu(0) = '1' then
         for i in lanes'range loop
           if v_rd_eq(r, e, j, to_rfatype(r.a.rfa1(i))) or
              v_rd_eq(r, e, j, to_rfatype(r.a.rfa2(i))) then
@@ -7148,7 +7177,7 @@ architecture rtl of iunv is
     -- EX   any -> Rn (late)  or  any -> Rn (late)
     if late_alu = 1 then
       for j in lanes'range loop
-        if r.e.alu(j).lalu = '1' then
+        if r.e.alu(j).lalu(0) = '1' then
           for i in lanes'range loop
             if (v_rd_eq(r, e, j, to_rfatype(r.a.rfa1(i))) or
                 v_rd_eq(r, e, j, to_rfatype(r.a.rfa2(i)))) and
@@ -7164,7 +7193,7 @@ architecture rtl of iunv is
       end loop;
     else
       -- Without late_alu there's still CSR handled in the exception stage.
-      if r.e.alu(csr_lane).lalu = '1' then
+      if r.e.alu(csr_lane).lalu(0) = '1' then
         for i in lanes'range loop
           if (v_rd_eq(r, e, csr_lane, to_rfatype(r.a.rfa1(i))) or
               v_rd_eq(r, e, csr_lane, to_rfatype(r.a.rfa2(i)))) and
@@ -10074,7 +10103,7 @@ begin
                   r.e.alu(i).ctrl,         -- in  : Control Signal
                   ex_alu_res(i)            -- out : ALU Result
                   );
-      ex_alu_valid(i) := r.e.alu(i).valid and not r.e.alu(i).lalu;
+      ex_alu_valid(i) := r.e.alu(i).valid(0) and not r.e.alu(i).lalu(0);
     end loop;
 
     -- Forwarding Store Data ----------------------------------------------
@@ -10580,11 +10609,11 @@ begin
     ic_hold_issue := inst_hold or hold_fault;
     -- To the ALUs --------------------------------------------------------
     for i in lanes'range loop
-      v.e.alu(i).op1    := ra_alu_op1(i);
-      v.e.alu(i).op2    := ra_alu_op2(i);
-      v.e.alu(i).valid  := ra_alu_valid(i);
+      v.e.alu(i).op1    := set_doubl_data(std_ulogic_vector(ra_alu_op1(i)));
+      v.e.alu(i).op2    := set_doubl_data(std_ulogic_vector(ra_alu_op2(i)));
+      v.e.alu(i).valid  := (others => ra_alu_valid(i));
       v.e.alu(i).ctrl   := ra_alu_ctrl(i);
-      v.e.alu(i).lalu   := ic_lalu(i);
+      v.e.alu(i).lalu   := (others => ic_lalu(i));
     end loop;
 
     -- To the Branch Unit -------------------------------------------------
