@@ -581,6 +581,7 @@ architecture rtl of iunv is
   type word_lanes_type   is array (lanes'range) of word;
   type wordx_lanes_type  is array (lanes'range) of wordx;
   type wordx_lanes_type_ecc  is array (lanes'range) of ecc_vector(WORDX_ECC_RANGE.left downto WORDX_ECC_RANGE.right);
+  type wordx_lanes_type_parity  is array (lanes'range) of doubling_vector(wordx'length*2-1 downto -1);
   type word16_lanes_type is array (lanes'range) of word16;
   type word2_lanes_type  is array (lanes'range) of word2;
   type word3_lanes_type  is array (lanes'range) of word3;
@@ -1336,6 +1337,15 @@ architecture rtl of iunv is
     return res;
   end;  
 
+  function to_wordx_lanes_type(wordxlanes : wordx_lanes_type_parity) return wordx_lanes_type is
+    variable res : wordx_lanes_type;
+  begin
+    for i in lanes'range loop
+      res(i) := wordx(get_doubl_data(wordxlanes(i)));
+    end loop;
+    return res;
+  end;  
+
   function to_regacc_reg_type(regacc : regacc_reg_type_protect) return regacc_reg_type is
     variable res : regacc_reg_type;
   begin
@@ -1718,6 +1728,77 @@ architecture rtl of iunv is
     fsd_hi      : word;                         -- High half of fsd data
   end record;
 
+  type exception_reg_type_parity is record
+    ctrl        : pipeline_ctrl_lanes_type_parity; -- Pipeline control record
+    csr         : csr_type; -- CSR information
+    rfa1        : rfa_lanes_type; -- Register file record for op1
+    rfa2        : rfa_lanes_type; -- Register file record for op2
+    result      : wordx_lanes_type_parity; -- ALUs result
+    fpuflags    : std_logic_vector(4 downto 0); -- FPU flags
+    address     : addr_type; -- Computed address for Data cache
+    dci         : dcache_in_type; -- Data Cache record
+    data        : dcdtype; -- Data from Load unit
+    way         : std_logic_vector(DWAYMSB downto 0);
+    mexc        : std_ulogic; -- Exception flag from Data cache
+    exctype     : std_ulogic; -- Exception type from Data cache
+    exchyper    : std_ulogic; -- Hypervisor exception from cache
+    tval2       : wordx; -- Hypervisor exception info from cache
+    tval2type   : word2; -- Hypervisor exception info from cache
+    wcsr        : wordx; -- Load/store address for trace
+    csrw        : lanes_type; -- CSR write enable
+    csraxc      : std_ulogic; -- CSR write address not OK
+    ret         : word2; -- Privileged level to return
+    swap        : std_ulogic; -- Instrutions are swapped
+    alupreforw1 : mux_lanes_type; -- ALUs preforward information
+    alupreforw2 : mux_lanes_type; -- ALUs preforward information
+    lbranch     : std_ulogic; -- Late branch flag
+    alu         : alu_pair_type; -- Late ALUs record
+    spec_ld     : std_ulogic; -- Speculative load operation flag
+    rstate      : core_state; -- Core state
+    rasi        : nv_ras_in_type; -- Speculative RAS record
+    trig        : trig_type; -- Trigger on instruction
+    int         : lanes_type; -- Interrupt on instruction
+    irqcause    : cause_type; -- interrupt cause
+    fsd_hi      : word; -- High half of fsd data
+  end record;
+
+  function to_exception_reg_type(exc : exception_reg_type_parity) return exception_reg_type is
+    variable res : exception_reg_type;
+  begin
+    res.ctrl        := to_pipeline_ctrl_lanes_type(exc.ctrl);
+    res.csr         := exc.csr;
+    res.rfa1        := exc.rfa1;
+    res.rfa2        := exc.rfa2;
+    res.result      := to_wordx_lanes_type(exc.result);
+    res.fpuflags    := exc.fpuflags;
+    res.address     := exc.address;
+    res.dci         := exc.dci;
+    res.data        := exc.data;
+    res.way         := exc.way;
+    res.mexc        := exc.mexc;
+    res.exctype     := exc.exctype;
+    res.exchyper    := exc.exchyper;
+    res.tval2       := exc.tval2;
+    res.tval2type   := exc.tval2type;
+    res.wcsr        := exc.wcsr;
+    res.csrw        := exc.csrw;
+    res.csraxc      := exc.csraxc;
+    res.ret         := exc.ret;
+    res.swap        := exc.swap;
+    res.alupreforw1 := exc.alupreforw1;
+    res.alupreforw2 := exc.alupreforw2;
+    res.lbranch     := exc.lbranch;
+    res.alu         := exc.alu;
+    res.spec_ld     := exc.spec_ld;
+    res.rstate      := exc.rstate;
+    res.rasi        := exc.rasi;
+    res.trig        := exc.trig;
+    res.int         := exc.int;
+    res.irqcause    := exc.irqcause;
+    res.fsd_hi      := exc.fsd_hi;
+    return res;
+  end;
+
   -- Exception Stage <-> Write Back Stage -------------------------------------
   type writeback_reg_type is record
     ctrl          : pipeline_ctrl_lanes_type;       -- Pipeline control record
@@ -1797,7 +1878,7 @@ architecture rtl of iunv is
     a       : regacc_reg_type_protect;
     e       : execute_reg_type_parity;
     m       : memory_reg_type_parity;
-    x       : exception_reg_type;
+    x       : exception_reg_type_parity;
     wb      : writeback_reg_type;
     csr     : csr_reg_type;
     mmu     : nv_csr_out_type;  -- Pipelined on the way to MMU/cache controller
@@ -1894,11 +1975,11 @@ architecture rtl of iunv is
     v.m.trig                    := trig_none;
     v.m.spec_ld                 := '0';
     -- Exception Stage
-    v.x.ctrl                    := (others => pipeline_ctrl_none);
+    v.x.ctrl                    := (others => pipeline_ctrl_none_parity);
     v.x.csr                     := csr_none;
     v.x.rfa1                    := (others => (others => '0'));
     v.x.rfa2                    := (others => (others => '0'));
-    v.x.result                  := (others => zerox);
+    v.x.result                  := (others => (others => '0'));
     v.x.fpuflags                := (others => '0');
     v.x.address                 := (others => '0');
     v.x.dci                     := dcache_in_none;
@@ -2000,7 +2081,7 @@ architecture rtl of iunv is
     regs.a  := to_regacc_reg_type(r.a);
     regs.e  := to_execute_reg_type(r.e);
     regs.m  := to_memory_reg_type(r.m);
-    regs.x  := r.x;
+    regs.x  := to_exception_reg_type(r.x);
     regs.wb := r.wb;
     regs.csr := r.csr;
     regs.mmu    := r.mmu;
@@ -2027,7 +2108,7 @@ architecture rtl of iunv is
     when a  => return to_pipeline_ctrl_lanes_type(r.a.ctrl);
     when e  => return to_pipeline_ctrl_lanes_type(r.e.ctrl);
     when m  => return to_pipeline_ctrl_lanes_type(r.m.ctrl);
-    when x  => return r.x.ctrl;
+    when x  => return to_pipeline_ctrl_lanes_type(r.x.ctrl);
     when wb => return r.wb.ctrl;
     end case;
   end;
@@ -2110,8 +2191,8 @@ architecture rtl of iunv is
       c_valid := tmr_voter(r.m.ctrl(lane).valid(0), r.m.ctrl(lane).valid(1), r.m.ctrl(lane).valid(2));
       c_fusel := std_logic_vector(get_doubl_data(r.m.ctrl(lane).fusel));
     elsif stage = x then
-      c_valid := r.x.ctrl(lane).valid;
-      c_fusel := r.x.ctrl(lane).fusel;
+      c_valid := tmr_voter(r.x.ctrl(lane).valid(0), r.x.ctrl(lane).valid(1), r.x.ctrl(lane).valid(2));
+      c_fusel := std_logic_vector(get_doubl_data(r.x.ctrl(lane).fusel));
     else
       c_valid := r.wb.ctrl(lane).valid;
       c_fusel := r.wb.ctrl(lane).fusel;
@@ -2182,9 +2263,9 @@ architecture rtl of iunv is
       c_rdv   := tmr_voter(r.m.ctrl(lane).rdv(0), r.m.ctrl(lane).rdv(1), r.m.ctrl(lane).rdv(2));
       c_rd    := std_logic_vector(get_doubl_data(r.m.ctrl(lane).inst)(11 downto 7));
     elsif stage = x then
-      c_valid := r.x.ctrl(lane).valid;
-      c_rdv   := r.x.ctrl(lane).rdv;
-      c_rd    := r.x.ctrl(lane).inst(11 downto 7);
+      c_valid := tmr_voter(r.x.ctrl(lane).valid(0), r.x.ctrl(lane).valid(1), r.x.ctrl(lane).valid(2));
+      c_rdv   := tmr_voter(r.x.ctrl(lane).rdv(0), r.x.ctrl(lane).rdv(1), r.x.ctrl(lane).rdv(2));
+      c_rd    := std_logic_vector(get_doubl_data(r.x.ctrl(lane).inst)(11 downto 7));
     else
       c_valid := r.wb.ctrl(lane).valid;
       c_rdv   := r.wb.ctrl(lane).rdv;
@@ -2234,8 +2315,8 @@ architecture rtl of iunv is
       c_rdv   := tmr_voter(r.m.ctrl(lane).rdv(0), r.m.ctrl(lane).rdv(1), r.m.ctrl(lane).rdv(2));
       rdn_e   := rdn(2)(lane);
     elsif stage = x then
-      c_valid := r.x.ctrl(lane).valid;
-      c_rdv   := r.x.ctrl(lane).rdv;
+      c_valid := tmr_voter(r.x.ctrl(lane).valid(0), r.x.ctrl(lane).valid(1), r.x.ctrl(lane).valid(2));
+      c_rdv   := tmr_voter(r.x.ctrl(lane).rdv(0), r.x.ctrl(lane).rdv(1), r.x.ctrl(lane).rdv(2));
       rdn_e   := rdn(3)(lane);
     else
       c_valid := r.wb.ctrl(lane).valid;
@@ -2281,8 +2362,8 @@ architecture rtl of iunv is
       c_valid := tmr_voter(r.m.ctrl(lane).valid(0), r.m.ctrl(lane).valid(1), r.m.ctrl(lane).valid(2));
       c_rd    := std_logic_vector(get_doubl_data(r.m.ctrl(lane).inst)(11 downto 7));
     elsif stage = x then
-      c_valid := r.x.ctrl(lane).valid;
-      c_rd    := r.x.ctrl(lane).inst(11 downto 7);
+      c_valid := tmr_voter(r.x.ctrl(lane).valid(0), r.x.ctrl(lane).valid(1), r.x.ctrl(lane).valid(2));
+      c_rd    := std_logic_vector(get_doubl_data(r.x.ctrl(lane).inst)(11 downto 7));
     else
       c_valid := r.wb.ctrl(lane).valid;
       c_rd    := r.wb.ctrl(lane).inst(11 downto 7);
@@ -2326,7 +2407,7 @@ architecture rtl of iunv is
       c_valid := tmr_voter(r.m.ctrl(lane).valid(0), r.m.ctrl(lane).valid(1), r.m.ctrl(lane).valid(2));
       rdn_e   := rdn(2)(lane);
     elsif stage = x then
-      c_valid := r.x.ctrl(lane).valid;
+      c_valid := tmr_voter(r.x.ctrl(lane).valid(0), r.x.ctrl(lane).valid(1), r.x.ctrl(lane).valid(2));
       rdn_e   := rdn(3)(lane);
     else
       c_valid := r.wb.ctrl(lane).valid;
@@ -2355,8 +2436,8 @@ architecture rtl of iunv is
       c_rdv := tmr_voter(r.m.ctrl(lane).rdv(0), r.m.ctrl(lane).rdv(1), r.m.ctrl(lane).rdv(2));
       c_rd  := std_logic_vector(get_doubl_data(r.m.ctrl(lane).inst)(11 downto 7));
     elsif stage = x then
-      c_rdv := r.x.ctrl(lane).rdv;
-      c_rd  := r.x.ctrl(lane).inst(11 downto 7);
+      c_rdv := tmr_voter(r.x.ctrl(lane).rdv(0), r.x.ctrl(lane).rdv(1), r.x.ctrl(lane).rdv(2));
+      c_rd  := std_logic_vector(get_doubl_data(r.x.ctrl(lane).inst)(11 downto 7));
     else
       c_rdv := r.wb.ctrl(lane).rdv;
       c_rd  := r.wb.ctrl(lane).inst(11 downto 7);
@@ -2401,7 +2482,7 @@ architecture rtl of iunv is
       c_rdv := tmr_voter(r.m.ctrl(lane).rdv(0), r.m.ctrl(lane).rdv(1), r.m.ctrl(lane).rdv(2));
       rdn_e := rdn(2)(lane);
     elsif stage = x then
-      c_rdv := r.x.ctrl(lane).rdv;
+      c_rdv := tmr_voter(r.x.ctrl(lane).rdv(0), r.x.ctrl(lane).rdv(1), r.x.ctrl(lane).rdv(2));
       rdn_e := rdn(3)(lane);
     else
       c_rdv := r.wb.ctrl(lane).rdv;
@@ -2491,8 +2572,9 @@ architecture rtl of iunv is
                   not tmr_voter(r.m.ctrl(fpu_lane).xc(0), r.m.ctrl(fpu_lane).xc(1), r.m.ctrl(fpu_lane).xc(2));
       c_inst  := std_logic_vector(get_doubl_data(r.m.ctrl(fpu_lane).inst));
     elsif stage = x then
-      c_valid := r.x.ctrl(fpu_lane).valid and not r.x.ctrl(fpu_lane).xc;
-      c_inst  := r.x.ctrl(fpu_lane).inst;
+      c_valid := tmr_voter(r.x.ctrl(fpu_lane).valid(0), r.x.ctrl(fpu_lane).valid(1), r.x.ctrl(fpu_lane).valid(2)) and 
+                  not tmr_voter(r.x.ctrl(fpu_lane).xc(0), r.x.ctrl(fpu_lane).xc(1), r.x.ctrl(fpu_lane).xc(2));
+      c_inst  := std_logic_vector(get_doubl_data(r.x.ctrl(fpu_lane).inst));
     else
       c_valid := r.wb.ctrl(fpu_lane).valid and not r.wb.ctrl(fpu_lane).xc;
       c_inst  := r.wb.ctrl(fpu_lane).inst;
@@ -2592,11 +2674,11 @@ architecture rtl of iunv is
         end if;
       end if;
 
-      if r.x.ctrl(i).valid = '1' and r.x.ctrl(i).rdv = '1' and x_valid = '1' then
-        if r.x.ctrl(i).inst(11 downto 7) =  rfa1(dst_lane) then
+      if tmr_voter(r.x.ctrl(i).valid(0), r.x.ctrl(i).valid(1), r.x.ctrl(i).valid(2)) = '1' and tmr_voter(r.x.ctrl(i).rdv(0), r.x.ctrl(i).rdv(1), r.x.ctrl(i).rdv(2)) = '1' and m_valid = '1' then
+        if std_logic_vector(get_doubl_data(r.x.ctrl(i).inst)(11 downto 7)) =  rfa1(dst_lane) then
           forwarding.rfa1(stage_type'pos(x))(i) := '1';
         end if;
-        if r.x.ctrl(i).inst(11 downto 7) =  rfa2(dst_lane) then
+        if std_logic_vector(get_doubl_data(r.x.ctrl(i).inst)(11 downto 7)) =  rfa2(dst_lane) then
           forwarding.rfa2(stage_type'pos(x))(i) := '1';
         end if;
       end if;
@@ -3894,9 +3976,9 @@ architecture rtl of iunv is
     --   0  |   e   | addi x2, x1, 3
 
     case forw_op1 is
-    when "01"   => op1 := r.x.result(one);
+    when "01"   => op1 := wordx(get_doubl_data(r.x.result(one)));
     when "10"   => op1 := r.x.data(0)(wordx'range);
-    when "11"   => op1 := r.x.result(0);
+    when "11"   => op1 := wordx(get_doubl_data(r.x.result(0)));
     when others =>
     end case;
 
@@ -3905,9 +3987,9 @@ architecture rtl of iunv is
 
 
     case forw_op2 is
-    when "01"   => op2 := r.x.result(one);
+    when "01"   => op2 := wordx(get_doubl_data(r.x.result(one)));
     when "10"   => op2 := r.x.data(0)(wordx'range);
-    when "11"   => op2 := r.x.result(0);
+    when "11"   => op2 := wordx(get_doubl_data(r.x.result(0)));
     when others =>
     end case;
 
@@ -3940,9 +4022,9 @@ architecture rtl of iunv is
     --   0  |   e   | jal x1
 
     case forw_op1 is
-    when "01"   => op1 := r.x.result(one);
+    when "01"   => op1 := wordx(get_doubl_data(r.x.result(one)));
     when "10"   => op1 := r.x.data(0)(wordx'range);
-    when "11"   => op1 := r.x.result(0);
+    when "11"   => op1 := wordx(get_doubl_data(r.x.result(0)));
     when others =>
     end case;
 
@@ -4102,7 +4184,7 @@ architecture rtl of iunv is
     -- Op1 First Stage Mux
     case forw_op1 is
     when "001"  => op1 := r.x.data(0)(wordx'range);
-    when "010"  => op1 := r.x.result(nlane);
+    when "010"  => op1 := wordx(get_doubl_data(r.x.result(nlane)));
     when "011"  => op1 := r.wb.wdata(one);
     when "100"  => op1 := r.wb.wdata(0);
     when others =>
@@ -4111,7 +4193,7 @@ architecture rtl of iunv is
     -- Op2 First Stage Mux
     case forw_op2 is
     when "001"  => op2 := r.x.data(0)(wordx'range);
-    when "010"  => op2 := r.x.result(nlane);
+    when "010"  => op2 := wordx(get_doubl_data(r.x.result(nlane)));
     when "011"  => op2 := r.wb.wdata(one);
     when "100"  => op2 := r.wb.wdata(0);
     when others =>
@@ -4241,7 +4323,7 @@ architecture rtl of iunv is
     -- Op1 First Stage Mux
     case forw_op1 is
     when "001"  => op1 := r.x.data(0)(wordx'range);
-    when "010"  => op1 := r.x.result(nlane);
+    when "010"  => op1 := wordx(get_doubl_data(r.x.result(nlane)));
     when "011"  => op1 := r.wb.wdata(one);
     when "100"  => op1 := r.wb.wdata(0);
     when others =>
@@ -4353,7 +4435,7 @@ architecture rtl of iunv is
         if r.x.alu(0).lalu = '1' then
           mux_output_op1 := xc_data_in(0);
         else
-          mux_output_op1 := r.x.result(0);
+          mux_output_op1 := wordx(get_doubl_data(r.x.result(0)));
         end if;
       end if;
     elsif single_issue = 0 and
@@ -4361,7 +4443,7 @@ architecture rtl of iunv is
       if r.x.alu(one).lalu = '1' then
         mux_output_op1   := xc_data_in(one);
       else
-        mux_output_op1   := r.x.result(one);
+        mux_output_op1   := wordx(get_doubl_data(r.x.result(one)));
       end if;
     elsif mem_forw_op1 = "10" then
       if v_fusel_eq(r, m, 0, MUL) then
@@ -4407,7 +4489,7 @@ architecture rtl of iunv is
         if r.x.alu(0).lalu = '1' then
           mux_output_op2 := xc_data_in(0);
         else
-          mux_output_op2 := r.x.result(0);
+          mux_output_op2 := wordx(get_doubl_data(r.x.result(0)));
         end if;
       end if;
     elsif single_issue = 0 and
@@ -4415,7 +4497,7 @@ architecture rtl of iunv is
       if r.x.alu(one).lalu = '1' then
         mux_output_op2   := xc_data_in(one);
       else
-        mux_output_op2   := r.x.result(one);
+        mux_output_op2   := wordx(get_doubl_data(r.x.result(one)));
       end if;
     elsif mem_forw_op2 = "10" then
       if v_fusel_eq(r, m, 0, MUL) then
@@ -4520,7 +4602,7 @@ architecture rtl of iunv is
         if r.x.alu(0).lalu = '1' then
           mux_output_op1:= xc_data_in(0);
         else
-          mux_output_op1:= r.x.result(0);
+          mux_output_op1:= wordx(get_doubl_data(r.x.result(0)));
         end if;
       end if;
     elsif single_issue = 0 and
@@ -4528,7 +4610,7 @@ architecture rtl of iunv is
       if r.x.alu(one).lalu = '1' then
         mux_output_op1  := xc_data_in(one);
       else
-        mux_output_op1  := r.x.result(one);
+        mux_output_op1  := wordx(get_doubl_data(r.x.result(one)));
       end if;
     elsif mem_forw_op1 = "10" then
       if v_fusel_eq(r, m, 0, MUL) then
@@ -5171,17 +5253,17 @@ architecture rtl of iunv is
     xc_lane_out := '0';
     -- Check exception from previous stages
     for i in lanes'range loop
-      xcs(i)    := r.x.ctrl(i).xc;
+      xcs(i)    := tmr_voter(r.x.ctrl(csr_lane).xc(0), r.x.ctrl(csr_lane).xc(1), r.x.ctrl(csr_lane).xc(2));
       causes(i) := r.x.ctrl(i).cause;
       tvals(i)  := r.x.ctrl(i).tval;
     end loop;
 
     -- Insert CSR write exception
-    if r.x.ctrl(csr_lane).xc = '0' then
+    if tmr_voter(r.x.ctrl(csr_lane).xc(0), r.x.ctrl(csr_lane).xc(1), r.x.ctrl(csr_lane).xc(2)) = '0' then
       if csr_xc(csr_lane) = '1' then
         xcs(csr_lane)    := '1';
         causes(csr_lane) := csr_cause;
-        tvals(csr_lane)  := to0x(r.x.ctrl(csr_lane).inst);
+        tvals(csr_lane)  := to0x(word(get_doubl_data(r.x.ctrl(csr_lane).inst)));
       end if;
     end if;
 
@@ -5194,7 +5276,7 @@ architecture rtl of iunv is
       else
         causes(0)   := XC_INST_LOAD_PAGE_FAULT;
       end if;
-      if v_fusel_eq(r, x, 0, ST) or is_cbo(r.x.ctrl(memory_lane).inst) then
+      if v_fusel_eq(r, x, 0, ST) or is_cbo(word(get_doubl_data(r.x.ctrl(memory_lane).inst))) then
         if r.x.exctype = '1' then
           causes(0) := XC_INST_STORE_ACCESS_FAULT;
         elsif r.x.exchyper = '1' then
@@ -5214,38 +5296,38 @@ architecture rtl of iunv is
     -- Raise exception only if not flushed by fence in write back stage.
     if swap_in = '1' then
       if    single_issue = 0 and
-            xcs(1) = '1' and r.x.ctrl(1).valid = '1' then
+            xcs(1) = '1' and tmr_voter(r.x.ctrl(1).valid(0), r.x.ctrl(1).valid(1), r.x.ctrl(1).valid(2)) = '1' then
         xc           := '1';
         pc           := r.x.ctrl(1).pc;
-        inst         := r.x.ctrl(1).inst;
+        inst         := word(get_doubl_data(r.x.ctrl(1).inst));
         inst(1)      := not r.x.ctrl(1).comp;
         cause        := causes(1);
         tval         := tvals(1);
         flush        := "11";           -- flush both
         xc_lane_out  := '1';
-      elsif xcs(0) = '1' and r.x.ctrl(0).valid = '1' then
+      elsif xcs(0) = '1' and tmr_voter(r.x.ctrl(0).valid(0), r.x.ctrl(0).valid(1), r.x.ctrl(0).valid(2)) = '1' then
         xc           := '1';
         pc           := r.x.ctrl(0).pc;
-        inst         := r.x.ctrl(0).inst;
+        inst         := word(get_doubl_data(r.x.ctrl(0).inst));
         inst(1)      := not r.x.ctrl(0).comp;
         cause        := causes(0);
         tval         := tvals(0);
         flush        := "01";           -- flush lane 0 only
       end if;
     else
-      if    xcs(0) = '1' and r.x.ctrl(0).valid = '1' then
+      if    xcs(0) = '1' and tmr_voter(r.x.ctrl(0).valid(0), r.x.ctrl(0).valid(1), r.x.ctrl(0).valid(2)) = '1' then
         xc           := '1';
         pc           := r.x.ctrl(0).pc;
-        inst         := r.x.ctrl(0).inst;
+        inst         := word(get_doubl_data(r.x.ctrl(0).inst));
         inst(1)      := not r.x.ctrl(0).comp;
         cause        := causes(0);
         tval         := tvals(0);
         flush        := "11";           -- flush both
       elsif single_issue = 0 and
-            xcs(1) = '1' and r.x.ctrl(1).valid = '1' then
+            xcs(1) = '1' and tmr_voter(r.x.ctrl(1).valid(0), r.x.ctrl(1).valid(1), r.x.ctrl(1).valid(2)) = '1' then
         xc           := '1';
         pc           := r.x.ctrl(1).pc;
-        inst         := r.x.ctrl(1).inst;
+        inst         := word(get_doubl_data(r.x.ctrl(1).inst));
         inst(1)      := not r.x.ctrl(1).comp;
         cause        := causes(1);
         tval         := tvals(1);
@@ -5259,9 +5341,9 @@ architecture rtl of iunv is
     -- control and system instructions such as mret, sret, ...
     -- instruction access fault on JALR
     for i in lanes'range loop
-      if (r.x.ctrl(i).inst( 6 downto  0) = OP_SYSTEM and
-          r.x.ctrl(i).inst(14 downto 12) = "000"     and
-          r.x.ctrl(i).inst(24 downto 20) = "00010"   and
+      if (std_logic_vector(get_doubl_data(r.x.ctrl(i).inst)( 6 downto  0)) = OP_SYSTEM and
+          std_logic_vector(get_doubl_data(r.x.ctrl(i).inst)(14 downto 12)) = "000"     and
+          std_logic_vector(get_doubl_data(r.x.ctrl(i).inst)(24 downto 20)) = "00010"   and
           r.x.ctrl(i).cause(3 downto  2) = "10"      and  -- env call u/s/m
           not is_irq(r.x.ctrl(i).cause)) then
         flush(i) := '0';
@@ -5284,13 +5366,13 @@ architecture rtl of iunv is
       inst   := (others => '0');
       if swap_in = '1' then
         if    single_issue = 0 and
-              int_in(1) = '1' and r.x.ctrl(1).valid = '1' then
+              int_in(1) = '1' and tmr_voter(r.x.ctrl(1).valid(0), r.x.ctrl(1).valid(1), r.x.ctrl(1).valid(2)) = '1' then
           xcs(1)       := '1';
           pc           := r.x.ctrl(1).pc;
           flush        := "11";         -- flush both
           xc_lane_out  := '1';
           irq_taken(1) := '1';
-        elsif int_in(0) = '1' and r.x.ctrl(0).valid = '1' then
+        elsif int_in(0) = '1' and tmr_voter(r.x.ctrl(0).valid(0), r.x.ctrl(0).valid(1), r.x.ctrl(0).valid(2)) = '1' then
           xcs(0)       := '1';
           pc           := r.x.ctrl(0).pc;
           flush        := "01";         -- flush lane 0 only
@@ -5298,14 +5380,14 @@ architecture rtl of iunv is
           irq_taken(0) := '1';
         end if;
       else
-        if    int_in(0) = '1' and r.x.ctrl(0).valid = '1' then
+        if    int_in(0) = '1' and tmr_voter(r.x.ctrl(0).valid(0), r.x.ctrl(0).valid(1), r.x.ctrl(0).valid(2)) = '1' then
           xcs(0)       := '1';
           pc           := r.x.ctrl(0).pc;
           flush        := "11";         -- flush both
           xc_lane_out  := '0';  -- Needed to overwrite exception from other lane
           irq_taken(0) := '1';
         elsif single_issue = 0 and
-              int_in(1) = '1' and r.x.ctrl(1).valid = '1' then
+              int_in(1) = '1' and tmr_voter(r.x.ctrl(1).valid(0), r.x.ctrl(1).valid(1), r.x.ctrl(1).valid(2)) = '1' then
           xcs(1)       := '1';
           pc           := r.x.ctrl(1).pc;
           flush        := "10";         -- flush lane 1 only
@@ -5316,7 +5398,7 @@ architecture rtl of iunv is
     end if;
 
     -- Triggers: step, debug trigger (clear exception and instruction in wb)
-    if (r.x.ctrl(0).valid or r.x.ctrl(one).valid) = '1' then
+    if (tmr_voter(r.x.ctrl(0).valid(0), r.x.ctrl(0).valid(1), r.x.ctrl(0).valid(2)) or tmr_voter(r.x.ctrl(one).valid(0), r.x.ctrl(one).valid(1), r.x.ctrl(one).valid(2))) = '1' then
       if orv(r.x.trig.valid) = '1' and r.x.trig.action(1) = '1' then
         xcs         := (others => '0');
         xc          := '0';
@@ -5344,7 +5426,7 @@ architecture rtl of iunv is
         end if;
       elsif cause = XC_INST_LOAD_G_PAGE_FAULT or
             cause = XC_INST_STORE_G_PAGE_FAULT then
-        gva   := csr.v or is_hlsv(r.x.ctrl(0).inst);
+        gva   := csr.v or is_hlsv(std_logic_vector(get_doubl_data(r.x.ctrl(0).inst)));
         tval2 := r.x.tval2;
         if r.x.tval2type = "01" then
           -- The value from MMU/cache controller has no knowledge of
@@ -5359,7 +5441,7 @@ architecture rtl of iunv is
             cause = XC_INST_STORE_PAGE_FAULT  or
             cause = XC_INST_LOAD_ACCESS_FAULT or
             cause = XC_INST_STORE_ACCESS_FAULT then
-        gva   := csr.v or is_hlsv(r.x.ctrl(0).inst);
+        gva   := csr.v or is_hlsv(std_logic_vector(get_doubl_data(r.x.ctrl(0).inst)));
       end if;
 
       -- mtinst / htinst
@@ -7816,11 +7898,11 @@ architecture rtl of iunv is
       if v_fusel_eq(r, x, memory_lane, LD) then
         mux_output_op2  := r.x.data(0)(wordx'range);
       else
-        mux_output_op2  := r.x.result(0);
+        mux_output_op2  := std_logic_vector(get_doubl_data(r.x.result(0)));
       end if;
     elsif single_issue = 0 and
           xc_forw_op2 = "11" then
-      mux_output_op2    := r.x.result(1);
+      mux_output_op2    := std_logic_vector(get_doubl_data(r.x.result(1)));
     elsif mem_forw_op2 = "10" then
       mux_output_op2    := r.m.result(0);
     elsif single_issue = 0 and
@@ -7871,11 +7953,11 @@ architecture rtl of iunv is
     -- Non-constant
     variable flush : std_ulogic := '0';
   begin
-    if r.x.ctrl(memory_lane).valid = '1' then
-      if is_fence_i(r.x.ctrl(memory_lane).inst)     or
-         is_sfence_vma(r.x.ctrl(memory_lane).inst)  or
-         is_hfence_vvma(r.x.ctrl(memory_lane).inst) or
-         is_hfence_gvma(r.x.ctrl(memory_lane).inst) then
+    if tmr_voter(r.x.ctrl(memory_lane).valid(0), r.x.ctrl(memory_lane).valid(1), r.x.ctrl(memory_lane).valid(2)) = '1' then
+      if is_fence_i(std_logic_vector(get_doubl_data(r.x.ctrl(memory_lane).inst)))     or
+         is_sfence_vma(std_logic_vector(get_doubl_data(r.x.ctrl(memory_lane).inst)))  or
+         is_hfence_vvma(std_logic_vector(get_doubl_data(r.x.ctrl(memory_lane).inst))) or
+         is_hfence_gvma(std_logic_vector(get_doubl_data(r.x.ctrl(memory_lane).inst))) then
         flush   := '1';
       end if;
     end if;
@@ -8503,7 +8585,7 @@ architecture rtl of iunv is
         -- Address of the ebreak instruction
         dpc          := pc2xlen(r.x.ctrl(0).pc);
         if single_issue = 0 and
-           (xc_in(one) and r.x.ctrl(one).valid) = '1' then
+           (xc_in(one) and tmr_voter(r.x.ctrl(one).valid(0), r.x.ctrl(one).valid(1), r.x.ctrl(one).valid(2))) = '1' then
           dpc        := pc2xlen(r.x.ctrl(one).pc);
         end if;
         dcsr.cause   := DCAUSE_EBREAK;
@@ -8652,13 +8734,13 @@ architecture rtl of iunv is
       flushall         := '0';
       -- Search for committed ebreak instruction.
       for i in lanes'range loop
-        if (r.x.ctrl(i).valid and xc_in(i)) = '1' then
+        if (tmr_voter(r.x.ctrl(i).valid(0), r.x.ctrl(i).valid(1), r.x.ctrl(i).valid(2)) and xc_in(i)) = '1' then
           rstate       := dhalt;
           dexec_done   := '1';
           -- Not ebreak?
           -- Do not care about this if not first time around the
           -- loop and the first already came inside the outer if-statement.
-          if r.x.ctrl(i).inst /= x"00100073" and flushall = '0' then
+          if std_logic_vector(get_doubl_data(r.x.ctrl(i).inst)) /= x"00100073" and flushall = '0' then
             derr       := '1';
           end if;
           flushall     := '1';
@@ -9230,7 +9312,7 @@ begin
 
 
     -- Generate Next Pc for Fence -----------------------------------------
-    gen_next(r.x.ctrl(branch_lane).branch.naddr,  -- in  : Lane 1 Next PC
+    gen_next(std_logic_vector(get_doubl_data(r.x.ctrl(branch_lane).branch.naddr)),  -- in  : Lane 1 Next PC
              r.x.ctrl(0).pc,                      -- in  : Lane 0 PC
              r.x.ctrl(0).comp,                    -- in  : Lane 0 Compressed
              x_nextpc                             -- out : Next Pc
@@ -9276,7 +9358,7 @@ begin
                     r.x.alu(i).ctrl,              -- in  : Control Bits
                     x_alu_res(i)                  -- out : ALU Result
                     );
-        x_alu_valid(i) := r.x.alu(i).valid and r.x.ctrl(i).valid;
+        x_alu_valid(i) := r.x.alu(i).valid and tmr_voter(r.x.ctrl(i).valid(0), r.x.ctrl(i).valid(1), r.x.ctrl(i).valid(2));
       else
         x_alu_valid(i) := '0';
         x_alu_res(i)   := zerox;
@@ -9287,7 +9369,7 @@ begin
     x_csr_op1               := x_alu_op1(csr_lane);
     if csr_immediate(r, x) then
       x_csr_op1             := (others => '0');
-      x_csr_op1(4 downto 0) := r.x.ctrl(csr_lane).inst(19 downto 15);
+      x_csr_op1(4 downto 0) := std_logic_vector(get_doubl_data(r.x.ctrl(csr_lane).inst)(19 downto 15));
     end if;
     x_wcsr := csralu_op(x_csr_op1,        -- in  : Op1
                         r.x.csr.v,        -- in  : Op2
@@ -9300,11 +9382,11 @@ begin
     -- Write Back Data ----------------------------------------------------
     for i in lanes'range loop
       wbdata_gen(i,                             -- in  : Lane
-                 r.x.ctrl(i).fusel,             -- in  : Functional Units
+                 fuseltype(get_doubl_data(r.x.ctrl(i).fusel)),             -- in  : Functional Units
                  x_alu_valid(i),                -- in  : Late ALUs Valid Flag
                  r.x.alu(i).lalu,               -- in  : Late ALUs Enable Flag
-                 r.x.result(i),                 -- in  : Result from ALUs
-                 r.x.ctrl(i).csrv,              -- in  : CSR Valid Instruction
+                 word(get_doubl_data(r.x.result(i))),                 -- in  : Result from ALUs
+                 tmr_voter(r.x.ctrl(i).csrv(0), r.x.ctrl(i).csrv(1), r.x.ctrl(i).csrv(2)),              -- in  : CSR Valid Instruction
                  r.x.csr.v,                     -- in  : Result from CSR read
                  x_alu_res(i),                  -- in  : Result from late ALUs
                  r.x.data(0),                   -- in  : Data from LD/ST
@@ -9324,9 +9406,9 @@ begin
 
       -- The specification says that any actual read from MIP/SIP (not the rmw) must
       -- OR the incoming SEIP from the interrupt controller with MIP/SIP value.
-      if (r.x.ctrl(csr_lane).inst(31 downto 20) = CSR_MIP and
+      if (regs.x.ctrl(csr_lane).inst(31 downto 20) = CSR_MIP and
           r.csr.mideleg(cause2int(IRQ_S_EXTERNAL)) = '0') or
-         (r.x.ctrl(csr_lane).inst(31 downto 20) = CSR_SIP and
+         (regs.x.ctrl(csr_lane).inst(31 downto 20) = CSR_SIP and
           r.csr.mideleg(cause2int(IRQ_S_EXTERNAL)) /= '0') then
         x_wb_data(csr_lane)(cause2int(IRQ_S_EXTERNAL)) :=
           x_wb_data(csr_lane)(cause2int(IRQ_S_EXTERNAL)) or x_irq.seip;
@@ -9338,13 +9420,13 @@ begin
       branch_unit(active_extensions,
                   x_alu_op1(branch_lane),                 -- in  : Forwarded Op1
                   x_alu_op2(branch_lane),                 -- in  : Forwarded Op2
-                  r.x.ctrl(branch_lane).valid,            -- in  : Instruction Valid Flag
-                  r.x.ctrl(branch_lane).branch.valid,     -- in  : Branch Valid Flag
-                  r.x.ctrl(branch_lane).inst(14 downto 12),
-                  r.x.ctrl(branch_lane).branch.addr,      -- in  : Branch Target Address
-                  r.x.ctrl(branch_lane).branch.naddr,     -- in  : Branch Next Address
-                  r.x.ctrl(branch_lane).branch.taken,     -- in  : Branch Prediction
-                  r.x.ctrl(branch_lane).pc,               -- in  : PC of Branch Instruction
+                  regs.x.ctrl(branch_lane).valid,            -- in  : Instruction Valid Flag
+                  regs.x.ctrl(branch_lane).branch.valid,     -- in  : Branch Valid Flag
+                  regs.x.ctrl(branch_lane).inst(14 downto 12),
+                  regs.x.ctrl(branch_lane).branch.addr,      -- in  : Branch Target Address
+                  regs.x.ctrl(branch_lane).branch.naddr,     -- in  : Branch Next Address
+                  regs.x.ctrl(branch_lane).branch.taken,     -- in  : Branch Prediction
+                  regs.x.ctrl(branch_lane).pc,               -- in  : PC of Branch Instruction
                   x_branch_valid,                         -- out : Branch Valid Flag
                   x_branch_mispredict,                    -- out : Branch Misprediction Flag
                   x_branch_addr,                          -- out : Branch Target Address
@@ -9487,32 +9569,32 @@ begin
     end if;
 
     for i in lanes'range loop
-      v.wb.ctrl(i).pc      := r.x.ctrl(i).pc;
-      v.wb.ctrl(i).inst    := r.x.ctrl(i).inst;
-      v.wb.ctrl(i).cinst   := r.x.ctrl(i).cinst;
-      v.wb.ctrl(i).valid   := r.x.ctrl(i).valid and not (x_xc_flush(i) or x_flush);
-      v.wb.ctrl(i).comp    := r.x.ctrl(i).comp;
-      v.wb.ctrl(i).branch  := r.x.ctrl(i).branch;
-      v.wb.ctrl(i).rdv     := r.x.ctrl(i).rdv;
-      v.wb.ctrl(i).csrv    := r.x.ctrl(i).csrv and r.x.csrw(i);
-      v.wb.ctrl(i).csrdo   := r.x.ctrl(i).csrdo;
-      v.wb.ctrl(i).xc      := x_xc(i) and r.x.ctrl(i).valid and not x_flush;
+      v.wb.ctrl(i).pc      := regs.x.ctrl(i).pc;
+      v.wb.ctrl(i).inst    := regs.x.ctrl(i).inst;
+      v.wb.ctrl(i).cinst   := regs.x.ctrl(i).cinst;
+      v.wb.ctrl(i).valid   := regs.x.ctrl(i).valid and not (x_xc_flush(i) or x_flush);
+      v.wb.ctrl(i).comp    := regs.x.ctrl(i).comp;
+      v.wb.ctrl(i).branch  := regs.x.ctrl(i).branch;
+      v.wb.ctrl(i).rdv     := regs.x.ctrl(i).rdv;
+      v.wb.ctrl(i).csrv    := regs.x.ctrl(i).csrv and r.x.csrw(i);
+      v.wb.ctrl(i).csrdo   := regs.x.ctrl(i).csrdo;
+      v.wb.ctrl(i).xc      := x_xc(i) and regs.x.ctrl(i).valid and not x_flush;
       v.wb.ctrl(i).cause   := x_xc_cause(i);
       v.wb.ctrl(i).tval    := x_xc_tval(i);
-      v.wb.ctrl(i).fusel   := r.x.ctrl(i).fusel;
+      v.wb.ctrl(i).fusel   := regs.x.ctrl(i).fusel;
       v.wb.wcsr(i)         := x_wb_wcsr(i);        -- Data to the CSR file etc for trace
       v.wb.wdata(i)        := x_wb_data(i);        -- Data to the register file
-      v.wb.lalu(i)         := r.x.alu(i).lalu;
+      v.wb.lalu(i)         := regs.x.alu(i).lalu;
     end loop;
-    v.wb.ctrl(fpu_lane).fpu       := r.x.ctrl(fpu_lane).fpu;
-    v.wb.ctrl(fpu_lane).fpu_flush := r.x.ctrl(fpu_lane).fpu_flush;
-    v.wb.fpuflags                 := r.x.fpuflags;
+    v.wb.ctrl(fpu_lane).fpu       := regs.x.ctrl(fpu_lane).fpu;
+    v.wb.ctrl(fpu_lane).fpu_flush := regs.x.ctrl(fpu_lane).fpu_flush;
+    v.wb.fpuflags                 := regs.x.fpuflags;
 
 
     v.wb.ctrl(branch_lane).branch.mpred         := '0';
     -- r.wb.ctrl(branch_lane).branch.naddr is not used by anything
     -- use that for misprediction address
-    v.wb.ctrl(branch_lane).branch.naddr         := r.x.ctrl(branch_lane).branch.naddr;
+    v.wb.ctrl(branch_lane).branch.naddr         := regs.x.ctrl(branch_lane).branch.naddr;
 
     -- Generate Branch Signal ---------------------------------------------
     if late_branch = 1 then
@@ -9520,9 +9602,9 @@ begin
          x_flush   = '0' and r.x.lbranch    = '1'       and
          x_xc_irq_taken = "00" then
         v.wb.ctrl(branch_lane).branch.mpred   := '1';
-        v.wb.ctrl(branch_lane).branch.taken   := not r.x.ctrl(branch_lane).branch.taken;
+        v.wb.ctrl(branch_lane).branch.taken   := not regs.x.ctrl(branch_lane).branch.taken;
         if r.x.ctrl(branch_lane).branch.taken = '0' then
-          v.wb.ctrl(branch_lane).branch.naddr := r.x.ctrl(branch_lane).branch.addr;
+          v.wb.ctrl(branch_lane).branch.naddr := regs.x.ctrl(branch_lane).branch.addr;
         end if;
         -- If branch was really first instruction, invalidate second.
         if r.x.swap = '1' and single_issue = 0 then
@@ -9915,22 +9997,22 @@ begin
 
     -- To Exception Stage ------------------------------------------------
     for i in lanes'range loop
-      v.x.ctrl(i).pc      := regs.m.ctrl(i).pc;
-      v.x.ctrl(i).inst    := regs.m.ctrl(i).inst;
-      v.x.ctrl(i).cinst   := regs.m.ctrl(i).cinst;
-      v.x.ctrl(i).valid   := regs.m.ctrl(i).valid and not me_flush;
-      v.x.ctrl(i).rdv     := regs.m.ctrl(i).rdv;
-      v.x.ctrl(i).comp    := regs.m.ctrl(i).comp;
-      v.x.ctrl(i).branch  := regs.m.ctrl(i).branch;
-      v.x.ctrl(i).csrv    := regs.m.ctrl(i).csrv;
-      v.x.ctrl(i).csrdo   := regs.m.ctrl(i).csrdo;
-      v.x.ctrl(i).xc      := me_xc(i);
+      v.x.ctrl(i).pc      := r.m.ctrl(i).pc;
+      v.x.ctrl(i).inst    := set_doubl_data(std_ulogic_vector(regs.m.ctrl(i).inst));
+      v.x.ctrl(i).cinst   := r.m.ctrl(i).cinst;
+      v.x.ctrl(i).valid   := (others => (regs.m.ctrl(i).valid and not me_flush));
+      v.x.ctrl(i).rdv     := r.m.ctrl(i).rdv;
+      v.x.ctrl(i).comp    := r.m.ctrl(i).comp;
+      v.x.ctrl(i).branch  := r.m.ctrl(i).branch;
+      v.x.ctrl(i).csrv    := r.m.ctrl(i).csrv;
+      v.x.ctrl(i).csrdo   := r.m.ctrl(i).csrdo;
+      v.x.ctrl(i).xc      := (others => me_xc(i));
       v.x.ctrl(i).cause   := me_xc_cause(i);
       v.x.ctrl(i).tval    := me_xc_tval(i);
-      v.x.ctrl(i).fusel   := regs.m.ctrl(i).fusel;
+      v.x.ctrl(i).fusel   := set_doubl_data(std_ulogic_vector(regs.m.ctrl(i).fusel));
       v.x.rfa1(i)         := regs.m.rfa1(i);
       v.x.rfa2(i)         := regs.m.rfa2(i);
-      v.x.result(i)       := me_result(i)(wordx'range);
+      v.x.result(i)       := set_doubl_data(std_ulogic_vector(me_result(i)(wordx'range)));
       v.x.trig.valid(i)   := regs.m.trig.valid(i) and not me_flush;
       v.x.trig.nullify(i) := regs.m.trig.nullify(i);
       -- Previous code guarantees that there is no CSR write to registers
@@ -10382,7 +10464,7 @@ begin
       haltreq   => dbg_haltreq,
       x_rstate  => r.x.rstate,
       clr_pen   => x_trig_taken or dbg_flushall,
-      x_ctrl    => r.x.ctrl,
+      x_ctrl    => regs.x.ctrl,
       m_swap    => regs.m.swap,
       m_ctrl    => regs.m.ctrl,
       e_swap    => regs.e.swap,
@@ -10446,7 +10528,7 @@ begin
     if regs.m.ctrl(fpu_lane).valid = '1' then
       iu_fflags := iu_fflags or r.m.fpuflags;
     end if;
-    if r.x.ctrl(fpu_lane).valid = '1' then
+    if regs.x.ctrl(fpu_lane).valid = '1' then
       iu_fflags := iu_fflags or r.x.fpuflags;
     end if;
     if r.wb.ctrl(fpu_lane).valid = '1' then
@@ -10504,7 +10586,7 @@ begin
                        ex_result_fwd(0)   and tmr_voter(r.e.ctrl(0).valid(0), r.e.ctrl(0).valid(1), r.e.ctrl(0).valid(2)) and tmr_voter(r.e.ctrl(0).rdv(0), r.e.ctrl(0).rdv(1), r.e.ctrl(0).rdv(2)),
                        ex_result_fwd(one) and tmr_voter(r.e.ctrl(one).valid(0), r.e.ctrl(one).valid(1), r.e.ctrl(one).valid(2)) and tmr_voter(r.e.ctrl(one).rdv(0), r.e.ctrl(one).rdv(1), r.e.ctrl(one).rdv(2)),
                        x_alu_res,         -- in  : Data from LALU L0/L1 (C)
-                       v.x.result,        -- in  : Data from Mul/Div Unit
+                       to_wordx_lanes_type(v.x.result),        -- in  : Data from Mul/Div Unit
                        ra_data12(i),      -- in  : Regfile Data 1 (Op1)
                        ra_data34(i),      -- in  : Regfile Data 3 (Op2)
                        ra_alu_forw(i),    -- out : Forwarding Signals for ALU L0
@@ -10531,7 +10613,7 @@ begin
                       ex_result_fwd(0)   and tmr_voter(r.e.ctrl(0).valid(0), r.e.ctrl(0).valid(1), r.e.ctrl(0).valid(2)) and tmr_voter(r.e.ctrl(0).rdv(0), r.e.ctrl(0).rdv(1), r.e.ctrl(0).rdv(2)), -- ALU0 result valid
                       ex_result_fwd(one) and tmr_voter(r.e.ctrl(one).valid(0), r.e.ctrl(one).valid(1), r.e.ctrl(one).valid(2)) and tmr_voter(r.e.ctrl(one).rdv(0), r.e.ctrl(one).rdv(1), r.e.ctrl(one).rdv(2)),
                       x_alu_res,                -- in  : Data from LALU L0/L1 (C)
-                      v.x.result,               -- in  : Data from Mul/Div Unit
+                      to_wordx_lanes_type(v.x.result),               -- in  : Data from Mul/Div Unit
                       ra_data12(branch_lane),   -- in  : Regfile Data 2 (Op1)
                       ra_jump_forw,             -- out : Forwarding Signals for ALU L1
                       ra_jump_op1               -- out : Op1 for jump unit
@@ -11225,7 +11307,7 @@ begin
         v.a.csrw_eq(2) := '1';
       end if;
     end if;
-    if std_logic_vector(get_data(v.a.ctrl(csr_lane).inst)(31 downto 20)) = r.x.ctrl(csr_lane).inst(31 downto 20) then
+    if get_data(v.a.ctrl(csr_lane).inst)(31 downto 20) = std_ulogic_vector(regs.x.ctrl(csr_lane).inst(31 downto 20)) then
       if csr_ok(r,x) then
         v.a.csrw_eq(3) := '1';
       end if;
@@ -11942,7 +12024,7 @@ if (not rstn   or          -- Reset
     etrace_gen(
       holdn => holdn,
       r_wb  => r.wb,
-      r_x   => r.x,
+      r_x   => regs.x,
       r_csr => r.csr,
       eto   => veto);
 
@@ -12413,15 +12495,15 @@ if (not rstn   or          -- Reset
 
     -- Trace Code ----------------------------------------------------
     if v_fusel_eq(r, m, memory_lane, ST) then
-      v.x.result(memory_lane)     := me_stdata(wordx'range);
+      v.x.result(memory_lane)     := set_doubl_data(std_ulogic_vector(me_stdata(wordx'range)));
       v.x.fsd_hi                  := get_hi(me_stdata, 32);
       if r.m.dci.size = SZWORD then
         -- We can only be here if XLEN = 64 (FPU data comes another way).
-        v.x.result(memory_lane)   := to0x(me_stdata(31 downto 0));
+        v.x.result(memory_lane)   := set_doubl_data(std_ulogic_vector(to0x(me_stdata(31 downto 0))));
       elsif r.m.dci.size = SZHALF then
-        v.x.result(memory_lane)   := to0x(me_stdata(15 downto 0));
+        v.x.result(memory_lane)   := set_doubl_data(std_ulogic_vector(to0x(me_stdata(15 downto 0))));
       elsif r.m.dci.size = SZBYTE then
-        v.x.result(memory_lane)   := to0x(me_stdata( 7 downto 0));
+        v.x.result(memory_lane)   := set_doubl_data(std_ulogic_vector(to0x(me_stdata( 7 downto 0))));
       end if;
     end if;
     -- Only for trace
@@ -12551,10 +12633,10 @@ if (not rstn   or          -- Reset
         vfpui.data_id      := r.x.ctrl(fpu_lane).fpu;
         vfpui.data         := r.x.data(0);   -- Assume load
         -- Floating point and not load?
-        if r.x.ctrl(fpu_lane).inst(6 downto 0) = OP_FP then
+        if regs.x.ctrl(fpu_lane).inst(6 downto 0) = OP_FP then
           vfpui.data       := to64(x_alu_op1(fpu_lane));
         end if;
-        if is_valid_fpu(r, x) and is_fpu_from_int(r.x.ctrl(fpu_lane).inst) then
+        if is_valid_fpu(r, x) and is_fpu_from_int(regs.x.ctrl(fpu_lane).inst) then
           vfpui.data_valid := '1';
         end if;
       end if;
