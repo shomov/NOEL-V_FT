@@ -1828,6 +1828,67 @@ architecture rtl of iunv is
     unalg_pc      : pctype;                         -- Unaligned PC to write for BTB/BHT
     fsd_hi        : word;                           -- High half of fsd data
   end record;
+  
+  type writeback_reg_type_parity is record
+    ctrl          : pipeline_ctrl_lanes_type_parity; -- Pipeline control record
+    csr           : csr_type; -- CSR information
+    wdata         : wordx_lanes_type_parity; -- Write-back data to register file
+    wcsr          : wordx_lanes_type_parity; -- Write-back data to CSR etc for trace
+    fpuflags      : std_logic_vector(4 downto 0); -- FPU flags
+    lalu          : lanes_type; -- Late ALUs flag
+    flushall      : std_ulogic; -- Flushall instructions flag
+    csr_pipeflush : std_ulogic; -- Pipeline flush due to CSR instructions flag
+    csr_addrflush : std_ulogic; -- Address flush due to CSR instructions flag
+    fence_flush   : std_ulogic; -- Flush due to fence instructions flag
+    swap          : std_ulogic; -- Instrutions are swapped
+    rstate        : core_state; -- Core state (for logging)
+    xc_taken      : std_ulogic; -- Exception Taken Flag (for logging)
+    xc_taken_cause: cause_type; -- Exception Cause (for logging)
+    xc_taken_tval : wordx; -- Exception Value (for logging)
+    nextpc0       : pctype; -- Stored following pc for fence
+    rasi          : nv_ras_in_type; -- Speculative RAS record
+    prv           : priv_lvl_type; -- Only used for instruction trace printout
+    v             : std_ulogic; -- Only used for instruction trace printout
+    bht_bhistory  : std_logic_vector(4 downto 0); -- BHT bhistory input
+    bht_phistory  : word64; -- BHT phistory input
+    ret           : std_logic; -- xRet instruction
+    trap_taken    : lanes_type; -- Used for debug printing
+    icnt          : std_logic_vector(1 downto 0); -- instruction count event
+    unalg_pc      : pctype; -- Unaligned PC to write for BTB/BHT
+    fsd_hi        : word; -- High half of fsd data
+  end record;
+  
+  function to_writeback_reg_type(wb : writeback_reg_type_parity) return writeback_reg_type is
+    variable res : writeback_reg_type;
+  begin
+    res.ctrl          := to_pipeline_ctrl_lanes_type(wb.ctrl);
+    res.csr           := wb.csr;
+    res.wdata         := to_wordx_lanes_type(wb.wdata);
+    res.wcsr          := to_wordx_lanes_type(wb.wcsr);
+    res.fpuflags      := wb.fpuflags;
+    res.lalu          := wb.lalu;
+    res.flushall      := wb.flushall;
+    res.csr_pipeflush := wb.csr_pipeflush;
+    res.csr_addrflush := wb.csr_addrflush;
+    res.fence_flush   := wb.fence_flush;
+    res.swap          := wb.swap;
+    res.rstate        := wb.rstate;
+    res.xc_taken      := wb.xc_taken;
+    res.xc_taken_cause:= wb.xc_taken_cause;
+    res.xc_taken_tval := wb.xc_taken_tval;
+    res.nextpc0       := wb.nextpc0;
+    res.rasi          := wb.rasi;
+    res.prv           := wb.prv;
+    res.v             := wb.v;
+    res.bht_bhistory  := wb.bht_bhistory;
+    res.bht_phistory  := wb.bht_phistory;
+    res.ret           := wb.ret;
+    res.trap_taken    := wb.trap_taken;
+    res.icnt          := wb.icnt;
+    res.unalg_pc      := wb.unalg_pc;
+    res.fsd_hi        := wb.fsd_hi;
+    return res;
+  end;
 
   -- Debug-Module reegister ---------------------------------------------------
   type debugmodule_reg_type is record
@@ -1879,7 +1940,7 @@ architecture rtl of iunv is
     e       : execute_reg_type_parity;
     m       : memory_reg_type_parity;
     x       : exception_reg_type_parity;
-    wb      : writeback_reg_type;
+    wb      : writeback_reg_type_parity;
     csr     : csr_reg_type;
     mmu     : nv_csr_out_type;  -- Pipelined on the way to MMU/cache controller
     dm      : debugmodule_reg_type;
@@ -2007,10 +2068,10 @@ architecture rtl of iunv is
     v.x.irqcause                := (others => '0');
     v.x.fsd_hi                  := (others => '0');
     -- Writeback Stage
-    v.wb.ctrl                   := (others => pipeline_ctrl_none);
+    v.wb.ctrl                   := (others => pipeline_ctrl_none_parity);
     v.wb.csr                    := csr_none;
-    v.wb.wdata                  := (others => zerox);
-    v.wb.wcsr                   := (others => zerox);
+    v.wb.wdata                  := (others => (others => '0'));
+    v.wb.wcsr                   := (others => (others => '0'));
     v.wb.fpuflags               := (others => '0');
     v.wb.lalu                   := (others => '0');
     v.wb.flushall               := '0';
@@ -2082,7 +2143,7 @@ architecture rtl of iunv is
     regs.e  := to_execute_reg_type(r.e);
     regs.m  := to_memory_reg_type(r.m);
     regs.x  := to_exception_reg_type(r.x);
-    regs.wb := r.wb;
+    regs.wb := to_writeback_reg_type(r.wb);
     regs.csr := r.csr;
     regs.mmu    := r.mmu;
     regs.dm   := r.dm;
@@ -2109,7 +2170,7 @@ architecture rtl of iunv is
     when e  => return to_pipeline_ctrl_lanes_type(r.e.ctrl);
     when m  => return to_pipeline_ctrl_lanes_type(r.m.ctrl);
     when x  => return to_pipeline_ctrl_lanes_type(r.x.ctrl);
-    when wb => return r.wb.ctrl;
+    when wb => return to_pipeline_ctrl_lanes_type(r.wb.ctrl);
     end case;
   end;
 
@@ -2194,8 +2255,8 @@ architecture rtl of iunv is
       c_valid := tmr_voter(r.x.ctrl(lane).valid(0), r.x.ctrl(lane).valid(1), r.x.ctrl(lane).valid(2));
       c_fusel := std_logic_vector(get_doubl_data(r.x.ctrl(lane).fusel));
     else
-      c_valid := r.wb.ctrl(lane).valid;
-      c_fusel := r.wb.ctrl(lane).fusel;
+      c_valid := tmr_voter(r.wb.ctrl(lane).valid(0), r.wb.ctrl(lane).valid(1), r.wb.ctrl(lane).valid(2));
+      c_fusel := std_logic_vector(get_doubl_data(r.wb.ctrl(lane).fusel));
     end if;
 
     if c_valid = '1' then
@@ -2267,9 +2328,9 @@ architecture rtl of iunv is
       c_rdv   := tmr_voter(r.x.ctrl(lane).rdv(0), r.x.ctrl(lane).rdv(1), r.x.ctrl(lane).rdv(2));
       c_rd    := std_logic_vector(get_doubl_data(r.x.ctrl(lane).inst)(11 downto 7));
     else
-      c_valid := r.wb.ctrl(lane).valid;
-      c_rdv   := r.wb.ctrl(lane).rdv;
-      c_rd    := r.wb.ctrl(lane).inst(11 downto 7);
+      c_valid := tmr_voter(r.wb.ctrl(lane).valid(0), r.wb.ctrl(lane).valid(1), r.wb.ctrl(lane).valid(2));
+      c_rdv   := tmr_voter(r.wb.ctrl(lane).rdv(0), r.wb.ctrl(lane).rdv(1), r.wb.ctrl(lane).rdv(2));
+      c_rd    := std_logic_vector(get_doubl_data(r.wb.ctrl(lane).inst)(11 downto 7));
     end if;
 
     return c_valid = '1' and c_rdv = '1' and c_rd = rs;
@@ -2319,8 +2380,8 @@ architecture rtl of iunv is
       c_rdv   := tmr_voter(r.x.ctrl(lane).rdv(0), r.x.ctrl(lane).rdv(1), r.x.ctrl(lane).rdv(2));
       rdn_e   := rdn(3)(lane);
     else
-      c_valid := r.wb.ctrl(lane).valid;
-      c_rdv   := r.wb.ctrl(lane).rdv;
+      c_valid := tmr_voter(r.wb.ctrl(lane).valid(0), r.wb.ctrl(lane).valid(1), r.wb.ctrl(lane).valid(2));
+      c_rdv   := tmr_voter(r.wb.ctrl(lane).rdv(0), r.wb.ctrl(lane).rdv(1), r.wb.ctrl(lane).rdv(2));
       rdn_e   := rdn(4)(lane);
     end if;
 
@@ -2365,8 +2426,8 @@ architecture rtl of iunv is
       c_valid := tmr_voter(r.x.ctrl(lane).valid(0), r.x.ctrl(lane).valid(1), r.x.ctrl(lane).valid(2));
       c_rd    := std_logic_vector(get_doubl_data(r.x.ctrl(lane).inst)(11 downto 7));
     else
-      c_valid := r.wb.ctrl(lane).valid;
-      c_rd    := r.wb.ctrl(lane).inst(11 downto 7);
+      c_valid := tmr_voter(r.wb.ctrl(lane).valid(0), r.wb.ctrl(lane).valid(1), r.wb.ctrl(lane).valid(2));
+      c_rd    := std_logic_vector(get_doubl_data(r.wb.ctrl(lane).inst)(11 downto 7));
     end if;
 
     return c_valid = '1' and rdv = '1' and c_rd = rs;
@@ -2410,7 +2471,7 @@ architecture rtl of iunv is
       c_valid := tmr_voter(r.x.ctrl(lane).valid(0), r.x.ctrl(lane).valid(1), r.x.ctrl(lane).valid(2));
       rdn_e   := rdn(3)(lane);
     else
-      c_valid := r.wb.ctrl(lane).valid;
+      c_valid := tmr_voter(r.wb.ctrl(lane).valid(0), r.wb.ctrl(lane).valid(1), r.wb.ctrl(lane).valid(2));
       rdn_e   := rdn(4)(lane);
     end if;
 
@@ -2439,8 +2500,8 @@ architecture rtl of iunv is
       c_rdv := tmr_voter(r.x.ctrl(lane).rdv(0), r.x.ctrl(lane).rdv(1), r.x.ctrl(lane).rdv(2));
       c_rd  := std_logic_vector(get_doubl_data(r.x.ctrl(lane).inst)(11 downto 7));
     else
-      c_rdv := r.wb.ctrl(lane).rdv;
-      c_rd  := r.wb.ctrl(lane).inst(11 downto 7);
+      c_rdv := tmr_voter(r.wb.ctrl(lane).rdv(0), r.wb.ctrl(lane).rdv(1), r.wb.ctrl(lane).rdv(2));
+      c_rd  := std_logic_vector(get_doubl_data(r.wb.ctrl(lane).inst)(11 downto 7));
     end if;
 
     return valid = '1' and c_rdv = '1' and c_rd = rs;
@@ -2485,7 +2546,7 @@ architecture rtl of iunv is
       c_rdv := tmr_voter(r.x.ctrl(lane).rdv(0), r.x.ctrl(lane).rdv(1), r.x.ctrl(lane).rdv(2));
       rdn_e := rdn(3)(lane);
     else
-      c_rdv := r.wb.ctrl(lane).rdv;
+      c_rdv := tmr_voter(r.wb.ctrl(lane).rdv(0), r.wb.ctrl(lane).rdv(1), r.wb.ctrl(lane).rdv(2));
       rdn_e := rdn(4)(lane);
     end if;
 
@@ -2576,8 +2637,9 @@ architecture rtl of iunv is
                   not tmr_voter(r.x.ctrl(fpu_lane).xc(0), r.x.ctrl(fpu_lane).xc(1), r.x.ctrl(fpu_lane).xc(2));
       c_inst  := std_logic_vector(get_doubl_data(r.x.ctrl(fpu_lane).inst));
     else
-      c_valid := r.wb.ctrl(fpu_lane).valid and not r.wb.ctrl(fpu_lane).xc;
-      c_inst  := r.wb.ctrl(fpu_lane).inst;
+      c_valid := tmr_voter(r.wb.ctrl(fpu_lane).valid(0), r.wb.ctrl(fpu_lane).valid(1), r.wb.ctrl(fpu_lane).valid(2)) and 
+                  not tmr_voter(r.wb.ctrl(fpu_lane).xc(0), r.wb.ctrl(fpu_lane).xc(1), r.wb.ctrl(fpu_lane).xc(2));
+      c_inst  := std_logic_vector(get_doubl_data(r.wb.ctrl(fpu_lane).inst));
     end if;
 
     return c_valid = '1' and (is_fpu(c_inst) or is_fpu_mem(c_inst));
@@ -2683,11 +2745,11 @@ architecture rtl of iunv is
         end if;
       end if;
 
-      if r.wb.ctrl(i).valid = '1' and r.wb.ctrl(i).rdv = '1' and wb_valid = '1' then
-        if r.wb.ctrl(i).inst(11 downto 7) =  rfa1(dst_lane) then
+      if tmr_voter(r.wb.ctrl(i).valid(0), r.wb.ctrl(i).valid(1), r.wb.ctrl(i).valid(2)) = '1' and tmr_voter(r.wb.ctrl(i).rdv(0), r.wb.ctrl(i).rdv(1), r.wb.ctrl(i).rdv(2)) = '1' and wb_valid = '1' then
+        if std_logic_vector(get_doubl_data(r.wb.ctrl(i).inst)(11 downto 7)) =  rfa1(dst_lane) then
           forwarding.rfa1(stage_type'pos(wb))(i) := '1';
         end if;
-        if r.wb.ctrl(i).inst(11 downto 7) =  rfa2(dst_lane) then
+        if std_logic_vector(get_doubl_data(r.wb.ctrl(i).inst)(11 downto 7)) =  rfa2(dst_lane) then
           forwarding.rfa2(stage_type'pos(wb))(i) := '1';
         end if;
       end if;
@@ -3872,14 +3934,14 @@ architecture rtl of iunv is
       if late_alu = 1 then
         if    single_issue = 0 and
               r.wb.lalu(1) = '1' and v_rd_eq(r, wb, 1, rfa2) then
-          data := r.wb.wdata(1);
+          data := std_logic_vector(get_doubl_data(r.wb.wdata(1)));
         elsif r.wb.lalu(0) = '1' and v_rd_eq(r, wb, 0, rfa2) then
-          data := r.wb.wdata(0);
+          data := std_logic_vector(get_doubl_data(r.wb.wdata(0)));
         end if;
       else
         -- CSR is late.
         if    r.wb.lalu(csr_lane) = '1' and v_rd_eq(r, wb, csr_lane, rfa2) then
-          data := r.wb.wdata(csr_lane);
+          data := std_logic_vector(get_doubl_data(r.wb.wdata(csr_lane)));
         end if;
       end if;
     end if;
@@ -4185,8 +4247,8 @@ architecture rtl of iunv is
     case forw_op1 is
     when "001"  => op1 := r.x.data(0)(wordx'range);
     when "010"  => op1 := wordx(get_doubl_data(r.x.result(nlane)));
-    when "011"  => op1 := r.wb.wdata(one);
-    when "100"  => op1 := r.wb.wdata(0);
+    when "011"  => op1 := wordx(get_doubl_data(r.wb.wdata(one)));
+    when "100"  => op1 := wordx(get_doubl_data(r.wb.wdata(0)));
     when others =>
     end case;
 
@@ -4194,8 +4256,8 @@ architecture rtl of iunv is
     case forw_op2 is
     when "001"  => op2 := r.x.data(0)(wordx'range);
     when "010"  => op2 := wordx(get_doubl_data(r.x.result(nlane)));
-    when "011"  => op2 := r.wb.wdata(one);
-    when "100"  => op2 := r.wb.wdata(0);
+    when "011"  => op2 := wordx(get_doubl_data(r.wb.wdata(one)));
+    when "100"  => op2 := wordx(get_doubl_data(r.wb.wdata(0)));
     when others =>
     end case;
 
@@ -4324,8 +4386,8 @@ architecture rtl of iunv is
     case forw_op1 is
     when "001"  => op1 := r.x.data(0)(wordx'range);
     when "010"  => op1 := wordx(get_doubl_data(r.x.result(nlane)));
-    when "011"  => op1 := r.wb.wdata(one);
-    when "100"  => op1 := r.wb.wdata(0);
+    when "011"  => op1 := wordx(get_doubl_data(r.wb.wdata(one)));
+    when "100"  => op1 := wordx(get_doubl_data(r.wb.wdata(0)));
     when others =>
     end case;
 
@@ -4459,10 +4521,10 @@ architecture rtl of iunv is
         mux_output_op1   := r.m.result(one);
       end if;
     elsif wb_forw_op1 = "10" then
-      mux_output_op1     := r.wb.wdata(0);
+      mux_output_op1     := wordx(get_doubl_data(r.wb.wdata(0)));
     elsif single_issue = 0 and
           wb_forw_op1 = "11" then
-      mux_output_op1     := r.wb.wdata(one);
+      mux_output_op1     := wordx(get_doubl_data(r.wb.wdata(one)));
     end if;
 
     -- Second Stage Mux for Op1
@@ -4513,10 +4575,10 @@ architecture rtl of iunv is
         mux_output_op2   := r.m.result(one);
       end if;
     elsif wb_forw_op2 = "10" then
-      mux_output_op2     := r.wb.wdata(0);
+      mux_output_op2     := wordx(get_doubl_data(r.wb.wdata(0)));
     elsif single_issue = 0 and
           wb_forw_op2 = "11" then
-      mux_output_op2     := r.wb.wdata(one);
+      mux_output_op2     := wordx(get_doubl_data(r.wb.wdata(one)));
     end if;
 
     -- Second Stage Mux for Op2
@@ -4626,10 +4688,10 @@ architecture rtl of iunv is
         mux_output_op1  := r.m.result(one);
       end if;
     elsif wb_forw_op1 = "10" then
-      mux_output_op1    := r.wb.wdata(0);
+      mux_output_op1    := wordx(get_doubl_data(r.wb.wdata(0)));
     elsif single_issue = 0 and
           wb_forw_op1 = "11" then
-      mux_output_op1    := r.wb.wdata(one);
+      mux_output_op1    := wordx(get_doubl_data(r.wb.wdata(one)));
     end if;
 
     -- Second Stage Mux for Op1
@@ -7909,10 +7971,10 @@ architecture rtl of iunv is
           mem_forw_op2 = "11" then
       mux_output_op2    := r.m.result(1);
     elsif wb_forw_op2 = "10" then
-      mux_output_op2    := r.wb.wdata(0);
+      mux_output_op2    := wordx(get_doubl_data(r.wb.wdata(0)));
     elsif single_issue = 0 and
           wb_forw_op2 = "11" then
-      mux_output_op2    := r.wb.wdata(1);
+      mux_output_op2    := wordx(get_doubl_data(r.wb.wdata(1)));
     else
     end if;
 
@@ -7975,7 +8037,7 @@ architecture rtl of iunv is
   begin
     -- In case of fence_flush, ensure that the instruction is still valid!
     -- It might have been invalidated due to a mispredicted branch (swap).
-    if r.wb.flushall = '0' and r.wb.fence_flush = '1' and r.wb.ctrl(memory_lane).valid = '1' then
+    if r.wb.flushall = '0' and r.wb.fence_flush = '1' and tmr_voter(r.wb.ctrl(memory_lane).valid(0), r.wb.ctrl(memory_lane).valid(1), r.wb.ctrl(memory_lane).valid(2)) = '1' then
       flush   := '1';
     end if;
 
@@ -9228,8 +9290,8 @@ begin
     -----------------------------------------------------------------------
 
     -- Branch misprediction registered
-    wb_branch      := r.wb.ctrl(branch_lane).branch.mpred and r.wb.ctrl(branch_lane).valid;
-    wb_branch_addr := r.wb.ctrl(branch_lane).branch.naddr;
+    wb_branch      := regs.wb.ctrl(branch_lane).branch.mpred and regs.wb.ctrl(branch_lane).valid;
+    wb_branch_addr := regs.wb.ctrl(branch_lane).branch.naddr;
 
     -- Fence Logic --------------------------------------------------------
     fence_unit(r,                               -- in  : Register
@@ -9246,8 +9308,8 @@ begin
     wb_btbflush  := wb_pipeflush or wb_addrflush;
 
     -- Branch History Table Update Logic ----------------------------------
-    bht_update(r.wb.ctrl(branch_lane),          -- in  : Ctrl
-               r.wb.unalg_pc,
+    bht_update(regs.wb.ctrl(branch_lane),          -- in  : Ctrl
+               regs.wb.unalg_pc,
                r.csr.dfeaturesen,               -- in  : CSR Feature Enable
                wb_bhti                          -- out : BHTI
                );
@@ -9256,8 +9318,8 @@ begin
     bhti.wdata  <= wb_bhti.wdata;
 
     -- Branch Target Buffer Update Logic ----------------------------------
-    btb_update(r.wb.ctrl(branch_lane),          -- in  : Ctrl
-               r.wb.unalg_pc,
+    btb_update(regs.wb.ctrl(branch_lane),          -- in  : Ctrl
+               regs.wb.unalg_pc,
                r.csr.dfeaturesen,               -- in  : CSR Feature Enable
                wb_btbflush,                     -- in  : Fence.i Flush Signal
                wb_btbi                          -- out : BTBI
@@ -9273,8 +9335,8 @@ begin
     -- To Register File ---------------------------------------------------
     for i in lanes'range loop
       rfi_waddr12(i)      := rd(r, wb, i);
-      rfi_wdata12(i)      := r.wb.wdata(i);
-      rfi_wen12(i)        := r.wb.ctrl(i).rdv and r.wb.ctrl(i).valid and holdn;
+      rfi_wdata12(i)      := regs.wb.wdata(i);
+      rfi_wen12(i)        := regs.wb.ctrl(i).rdv and regs.wb.ctrl(i).valid and holdn;
     end loop;
 
     -- Only allow one write (latest) to a specific destination register!
@@ -9570,20 +9632,20 @@ begin
 
     for i in lanes'range loop
       v.wb.ctrl(i).pc      := regs.x.ctrl(i).pc;
-      v.wb.ctrl(i).inst    := regs.x.ctrl(i).inst;
+      v.wb.ctrl(i).inst    := r.x.ctrl(i).inst;
       v.wb.ctrl(i).cinst   := regs.x.ctrl(i).cinst;
-      v.wb.ctrl(i).valid   := regs.x.ctrl(i).valid and not (x_xc_flush(i) or x_flush);
+      v.wb.ctrl(i).valid   := (others => regs.x.ctrl(i).valid and not (x_xc_flush(i) or x_flush));
       v.wb.ctrl(i).comp    := regs.x.ctrl(i).comp;
-      v.wb.ctrl(i).branch  := regs.x.ctrl(i).branch;
-      v.wb.ctrl(i).rdv     := regs.x.ctrl(i).rdv;
-      v.wb.ctrl(i).csrv    := regs.x.ctrl(i).csrv and r.x.csrw(i);
+      v.wb.ctrl(i).branch  := r.x.ctrl(i).branch;
+      v.wb.ctrl(i).rdv     := r.x.ctrl(i).rdv;
+      v.wb.ctrl(i).csrv    := (others => regs.x.ctrl(i).csrv and r.x.csrw(i));
       v.wb.ctrl(i).csrdo   := regs.x.ctrl(i).csrdo;
-      v.wb.ctrl(i).xc      := x_xc(i) and regs.x.ctrl(i).valid and not x_flush;
+      v.wb.ctrl(i).xc      := (others => x_xc(i) and regs.x.ctrl(i).valid and not x_flush);
       v.wb.ctrl(i).cause   := x_xc_cause(i);
       v.wb.ctrl(i).tval    := x_xc_tval(i);
-      v.wb.ctrl(i).fusel   := regs.x.ctrl(i).fusel;
-      v.wb.wcsr(i)         := x_wb_wcsr(i);        -- Data to the CSR file etc for trace
-      v.wb.wdata(i)        := x_wb_data(i);        -- Data to the register file
+      v.wb.ctrl(i).fusel   := r.x.ctrl(i).fusel;
+      v.wb.wcsr(i)         := set_doubl_data(std_ulogic_vector(x_wb_wcsr(i)));        -- Data to the CSR file etc for trace
+      v.wb.wdata(i)        := set_doubl_data(std_ulogic_vector(x_wb_data(i)));        -- Data to the register file
       v.wb.lalu(i)         := regs.x.alu(i).lalu;
     end loop;
     v.wb.ctrl(fpu_lane).fpu       := regs.x.ctrl(fpu_lane).fpu;
@@ -9594,7 +9656,7 @@ begin
     v.wb.ctrl(branch_lane).branch.mpred         := '0';
     -- r.wb.ctrl(branch_lane).branch.naddr is not used by anything
     -- use that for misprediction address
-    v.wb.ctrl(branch_lane).branch.naddr         := regs.x.ctrl(branch_lane).branch.naddr;
+    v.wb.ctrl(branch_lane).branch.naddr         := r.x.ctrl(branch_lane).branch.naddr;
 
     -- Generate Branch Signal ---------------------------------------------
     if late_branch = 1 then
@@ -9604,11 +9666,11 @@ begin
         v.wb.ctrl(branch_lane).branch.mpred   := '1';
         v.wb.ctrl(branch_lane).branch.taken   := not regs.x.ctrl(branch_lane).branch.taken;
         if r.x.ctrl(branch_lane).branch.taken = '0' then
-          v.wb.ctrl(branch_lane).branch.naddr := regs.x.ctrl(branch_lane).branch.addr;
+          v.wb.ctrl(branch_lane).branch.naddr := r.x.ctrl(branch_lane).branch.addr;
         end if;
         -- If branch was really first instruction, invalidate second.
         if r.x.swap = '1' and single_issue = 0 then
-          v.wb.ctrl(0).valid                  := '0';
+          v.wb.ctrl(0).valid                  := (others => '0');
           if fpu_lane = 0 then
             x_fpu_flush                       := '1';
           end if;
@@ -9655,7 +9717,7 @@ begin
 
     trigger_update(
       csr_in    => wb_csr_trig,
-      v_wb_ctrl => v.wb.ctrl,
+      v_wb_ctrl => to_pipeline_ctrl_lanes_type(v.wb.ctrl),
       trig_in   => r.x.trig,
       csr_out   => v.csr);
 
@@ -10531,7 +10593,7 @@ begin
     if regs.x.ctrl(fpu_lane).valid = '1' then
       iu_fflags := iu_fflags or r.x.fpuflags;
     end if;
-    if r.wb.ctrl(fpu_lane).valid = '1' then
+    if regs.wb.ctrl(fpu_lane).valid = '1' then
       iu_fflags := iu_fflags or r.wb.fpuflags;
     end if;
 
@@ -11918,13 +11980,13 @@ if (not rstn   or          -- Reset
 
     bhti_wen_v       := '0';
     bhti_taken_v     := r.wb.ctrl(branch_lane).branch.taken;
-    if r.wb.ctrl(branch_lane).valid = '1' then
-      if r.wb.ctrl(branch_lane).branch.valid = '1' then
+    if regs.wb.ctrl(branch_lane).valid = '1' then
+      if regs.wb.ctrl(branch_lane).branch.valid = '1' then
         bhti_wen_v   := '1';
       end if;
 
-      if r.wb.ctrl(branch_lane).valid = '1' and
-         v_fusel_eq(r.wb.ctrl(branch_lane).fusel, JAL) and r.csr.dfeaturesen.jprd_dis = '0' then
+      if regs.wb.ctrl(branch_lane).valid = '1' and
+         v_fusel_eq(regs.wb.ctrl(branch_lane).fusel, JAL) and r.csr.dfeaturesen.jprd_dis = '0' then
         bhti_wen_v   := '1';
         bhti_taken_v := '1';
       end if;
@@ -12002,7 +12064,7 @@ if (not rstn   or          -- Reset
 
     -- Instruction Trace --------------------------------------------------
 
-    itrace_in.info        := itrace_gen(r.csr.mcycle, r.wb);
+    itrace_in.info        := itrace_gen(r.csr.mcycle, regs.wb);
     itrace_in.holdn       := holdn;
     case r.wb.rstate is
     when run   => itrace_in.rstate := "00";
@@ -12023,7 +12085,7 @@ if (not rstn   or          -- Reset
     -- E-Trace interface --------------------------------------------------
     etrace_gen(
       holdn => holdn,
-      r_wb  => r.wb,
+      r_wb  => regs.wb,
       r_x   => regs.x,
       r_csr => r.csr,
       eto   => veto);
@@ -12039,9 +12101,11 @@ if (not rstn   or          -- Reset
       end if;
       if holdn = '1' and rstn = '1' and r.csr.mcountinhibit(2) = '0' and wb_upd_minstret = '0' then
         if single_issue = 0 and
-           (v.wb.ctrl(0).valid and v.wb.ctrl(one).valid) = '1' then
+           (tmr_voter(v.wb.ctrl(0).valid(0), v.wb.ctrl(0).valid(1), v.wb.ctrl(0).valid(2)) 
+              and tmr_voter(v.wb.ctrl(one).valid(0), v.wb.ctrl(one).valid(1), v.wb.ctrl(one).valid(2))) = '1' then
           v.csr.minstret := uadd(r.csr.minstret, 2);
-        elsif (v.wb.ctrl(0).valid or v.wb.ctrl(one).valid) = '1' then
+        elsif (tmr_voter(v.wb.ctrl(0).valid(0), v.wb.ctrl(0).valid(1), v.wb.ctrl(0).valid(2)) or 
+            tmr_voter(v.wb.ctrl(one).valid(0), v.wb.ctrl(one).valid(1), v.wb.ctrl(one).valid(2))) = '1' then
           v.csr.minstret := uadd(r.csr.minstret, 1);
         end if;
       end if;
@@ -12092,8 +12156,8 @@ if (not rstn   or          -- Reset
     if ext_f = 1 and fpuo.flags_wen = '1' then
       v.csr.fflags := v.csr.fflags or fpuo.flags;
     end if;
-    if ext_f = 1 and r.wb.ctrl(fpu_lane).valid = '1' and
-       is_fpu(r.wb.ctrl(fpu_lane).inst) then
+    if ext_f = 1 and regs.wb.ctrl(fpu_lane).valid = '1' and
+       is_fpu(regs.wb.ctrl(fpu_lane).inst) then
       v.csr.fflags := v.csr.fflags or r.wb.fpuflags;
     end if;
 
@@ -12123,8 +12187,8 @@ if (not rstn   or          -- Reset
       -- Things that update during hold.
       v.evt(CSR_HPM_HOLD)         := '1';
     else
-      v.evt(CSR_HPM_DUAL_ISSUE)   := to_bit(single_issue = 0) and v.wb.ctrl(0).valid and v.wb.ctrl(one).valid;
-      v.evt(CSR_HPM_SINGLE_ISSUE) := v.wb.ctrl(0).valid xor (to_bit(single_issue = 0) and v.wb.ctrl(one).valid);
+      v.evt(CSR_HPM_DUAL_ISSUE)   := to_bit(single_issue = 0) and tmr_voter(v.wb.ctrl(0).valid(0), v.wb.ctrl(0).valid(1), v.wb.ctrl(0).valid(2)) and tmr_voter(v.wb.ctrl(one).valid(0), v.wb.ctrl(one).valid(1), v.wb.ctrl(one).valid(2));
+      v.evt(CSR_HPM_SINGLE_ISSUE) := tmr_voter(v.wb.ctrl(0).valid(0), v.wb.ctrl(0).valid(1), v.wb.ctrl(0).valid(2)) xor (to_bit(single_issue = 0) and tmr_voter(v.wb.ctrl(one).valid(0), v.wb.ctrl(one).valid(1), v.wb.ctrl(one).valid(2)));
       v.evt(CSR_HPM_BRANCH_MISS)  := (mem_branch or wb_branch);
       v.evt(CSR_HPM_HOLD_ISSUE)   := de_hold_pc;
       v.evt(CSR_HPM_BRANCH)       := to_bit(v_fusel_eq(v, wb, branch_lane, BRANCH));
@@ -12146,7 +12210,7 @@ if (not rstn   or          -- Reset
     -- holdn is handled explicitly in the seq process
     v.wb.icnt          := (others => '0');
     for i in lanes'range loop
-      if r.wb.ctrl(i).valid = '1' and r.wb.ctrl(i).xc = '0' then
+      if regs.wb.ctrl(i).valid = '1' and regs.wb.ctrl(i).xc = '0' then
         if holdn = '1' then
           v.wb.icnt(i) := '1';
         end if;
@@ -12651,7 +12715,7 @@ if (not rstn   or          -- Reset
       vfpui.flush(3)    := r.fpflush(3);
       vfpui.flush(4)    := r.fpflush(4);
       -- Commit
-      fpu_ctrl          := r.wb.ctrl(fpu_lane);
+      fpu_ctrl          := regs.wb.ctrl(fpu_lane);
       vfpui.commit      := holdn and to_bit(is_valid_fpu(r, wb) and
                                             is_fpu_rd(fpu_ctrl.inst));
       vfpui.commit_id   := fpu_ctrl.fpu;
