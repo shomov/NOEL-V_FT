@@ -9,6 +9,12 @@ package nmr_common is
         c    : in std_ulogic_vector
     ) return std_ulogic_vector;
 
+    function tmr_voter_vector (
+        a    : in std_logic_vector;
+        b    : in std_logic_vector;
+        c    : in std_logic_vector
+    ) return std_logic_vector;
+
     function tmr_voter (
         a    : in std_ulogic;
         b    : in std_ulogic;
@@ -38,6 +44,21 @@ package body nmr_common is
         )
         return std_ulogic_vector is
         variable res : std_ulogic_vector(a'length-1 downto 0);
+    begin
+        for i in 0 to res'length-1 loop
+            res(i) :=   (a(i) and b(i)) or
+                        (b(i) and c(i)) or
+                        (a(i) and c(i));
+        end loop;
+        return res;
+    end;
+    function tmr_voter_vector (
+        a    : in std_logic_vector;
+        b    : in std_logic_vector;
+        c    : in std_logic_vector
+        )
+        return std_logic_vector is
+        variable res : std_logic_vector(a'length-1 downto 0);
     begin
         for i in 0 to res'length-1 loop
             res(i) :=   (a(i) and b(i)) or
